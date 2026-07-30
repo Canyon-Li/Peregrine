@@ -1,1 +1,1 @@
-"""Peregrine backend application."""
+"""Peregrine 后端应用。"""

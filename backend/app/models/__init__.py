@@ -1,4 +1,4 @@
-"""Public model adapter API."""
+"""模型适配层的公共接口。"""
 
 from .adapter import ModelAdapter
 from .config import ModelSettings, ProviderConfig
@@ -19,6 +19,7 @@ from .types import (
     ModelUsage,
     ToolCall,
     ToolDefinition,
+    ToolResult,
 )
 
 __all__ = [
@@ -37,6 +38,7 @@ __all__ = [
     "ProviderNotConfiguredError",
     "ToolCall",
     "ToolDefinition",
+    "ToolResult",
     "UnsupportedMessageError",
     "UnsupportedProviderError",
 ]
