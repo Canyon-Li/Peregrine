@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
+from contextlib import suppress
 from typing import Any
+from uuid import uuid4
 
 from app.models.registry import ModelAdapterRegistry
 from app.models.types import (
@@ -16,7 +19,12 @@ from app.models.types import (
     ToolCall,
     ToolResult,
 )
-from app.tools.approval import ApprovalGate
+from app.tools.approval import (
+    ApprovalCallback,
+    ApprovalDecision,
+    ApprovalGate,
+    ApprovalRequest,
+)
 from app.tools.executor import ToolExecutor
 from app.tools.observability import ToolExecutionRecord
 from app.tools.registry import ToolRegistry
@@ -26,6 +34,13 @@ from .errors import (
     MaxStepsExceededError,
     ModelInvocationError,
     RepeatedToolCallError,
+)
+from .events import (
+    AgentEvent,
+    AgentEventHandler,
+    AgentEventType,
+    CompositeEventHandler,
+    NullEventHandler,
 )
 from .result import (
     AgentError,
@@ -81,6 +96,8 @@ class AgentRuntime:
         user_input: str,
         *,
         history: Sequence[Message] = (),
+        conversation_id: str | None = None,
+        event_handler: AgentEventHandler | None = None,
     ) -> AgentResult:
         """处理一次用户输入并返回完整的运行结果（AgentResult）。
 
@@ -88,14 +105,34 @@ class AgentRuntime:
         ``AgentResult.error`` 与停止原因返回。
         """
 
-        messages = [*history, Message(role=MessageRole.USER, content=user_input)]
+        run_id = uuid4().hex
+        emitter = _EventEmitter(
+            handler=event_handler or NullEventHandler(),
+            run_id=run_id,
+            conversation_id=conversation_id,
+        )
+        user_message = Message(role=MessageRole.USER, content=user_input)
+        messages = [*history, user_message]
         previous_signature: str | None = None
         repeated_count = 0
         tool_rounds: list[ToolRound] = []
         tool_calls: list[ToolCallRecord] = []
         usage = ModelUsage()
 
+        await emitter.emit(
+            AgentEventType.AGENT_STARTED,
+            message=user_message,
+            provider=_provider_name(self._provider),
+            model=self._model,
+        )
+
         for step in range(1, self._max_steps + 1):
+            await emitter.emit(
+                AgentEventType.MODEL_STARTED,
+                step=step,
+                provider=_provider_name(self._provider),
+                model=self._model,
+            )
             try:
                 adapter = self._model_registry.get(self._provider)
                 response = await adapter.complete(
@@ -108,7 +145,8 @@ class AgentRuntime:
                 )
             except Exception as exc:
                 error = ModelInvocationError(f"{type(exc).__name__}: {exc}")
-                return self._result(
+                result = self._result(
+                    run_id=run_id,
                     final_message=self._error_message(error),
                     messages=messages,
                     steps=step,
@@ -118,13 +156,34 @@ class AgentRuntime:
                     usage=usage,
                     error=error,
                 )
+                await emitter.emit(
+                    AgentEventType.AGENT_FAILED,
+                    step=step,
+                    provider=_provider_name(self._provider),
+                    model=self._model,
+                    message=result.final_message,
+                    usage=usage,
+                    stop_reason=result.stop_reason,
+                    error=result.error,
+                    result=result,
+                )
+                return result
 
             usage = _add_usage(usage, response.usage)
             assistant_message = response.message
             messages.append(assistant_message)
+            await emitter.emit(
+                AgentEventType.MODEL_COMPLETED,
+                step=step,
+                provider=response.provider,
+                model=response.model,
+                message=assistant_message,
+                usage=response.usage,
+            )
             tool_calls_in_message = assistant_message.tool_calls
             if not tool_calls_in_message:
-                return self._result(
+                result = self._result(
+                    run_id=run_id,
                     final_message=assistant_message,
                     messages=messages,
                     steps=step,
@@ -133,6 +192,17 @@ class AgentRuntime:
                     tool_calls=tool_calls,
                     usage=usage,
                 )
+                await emitter.emit(
+                    AgentEventType.AGENT_COMPLETED,
+                    step=step,
+                    provider=response.provider,
+                    model=response.model,
+                    message=assistant_message,
+                    usage=usage,
+                    stop_reason=result.stop_reason,
+                    result=result,
+                )
+                return result
 
             round_records: list[ToolCallRecord] = []
             for tool_call in tool_calls_in_message:
@@ -145,7 +215,8 @@ class AgentRuntime:
 
                 if repeated_count >= 3:
                     error = RepeatedToolCallError(tool_call.name)
-                    return self._result(
+                    result = self._result(
+                        run_id=run_id,
                         final_message=self._error_message(error),
                         messages=messages,
                         steps=step,
@@ -155,8 +226,52 @@ class AgentRuntime:
                         usage=usage,
                         error=error,
                     )
+                    await emitter.emit(
+                        AgentEventType.AGENT_FAILED,
+                        step=step,
+                        provider=response.provider,
+                        model=response.model,
+                        message=result.final_message,
+                        tool_call=tool_call,
+                        usage=usage,
+                        stop_reason=result.stop_reason,
+                        error=result.error,
+                        result=result,
+                    )
+                    return result
 
-                result = await self._execute_tool(tool_call)
+                await emitter.emit(
+                    AgentEventType.TOOL_STARTED,
+                    step=step,
+                    tool_call=tool_call,
+                )
+
+                async def approval_callback(
+                    request: ApprovalRequest,
+                    decision: ApprovalDecision | None,
+                ) -> None:
+                    event_type = (
+                        AgentEventType.TOOL_APPROVAL_REQUIRED
+                        if decision is None
+                        else AgentEventType.TOOL_APPROVAL_COMPLETED
+                    )
+                    await emitter.emit(
+                        event_type,
+                        step=step,
+                        tool_call=tool_call,
+                        approval_decision=decision,
+                    )
+
+                result = await self._execute_tool(
+                    tool_call,
+                    approval_callback=approval_callback,
+                )
+                await emitter.emit(
+                    AgentEventType.TOOL_COMPLETED,
+                    step=step,
+                    tool_call=tool_call,
+                    tool_result=result,
+                )
                 record = ToolCallRecord(
                     round_index=len(tool_rounds),
                     tool_call=tool_call,
@@ -175,7 +290,8 @@ class AgentRuntime:
             )
 
         error = MaxStepsExceededError(self._max_steps)
-        return self._result(
+        result = self._result(
+            run_id=run_id,
             final_message=self._error_message(error),
             messages=messages,
             steps=self._max_steps,
@@ -185,10 +301,71 @@ class AgentRuntime:
             usage=usage,
             error=error,
         )
+        await emitter.emit(
+            AgentEventType.AGENT_FAILED,
+            step=self._max_steps,
+            provider=_provider_name(self._provider),
+            model=self._model,
+            message=result.final_message,
+            usage=usage,
+            stop_reason=result.stop_reason,
+            error=result.error,
+            result=result,
+        )
+        return result
 
-    async def _execute_tool(self, tool_call: ToolCall) -> ToolResult:
+    async def run_stream(
+        self,
+        user_input: str,
+        *,
+        history: Sequence[Message] = (),
+        conversation_id: str | None = None,
+        event_handler: AgentEventHandler | None = None,
+    ) -> AsyncIterator[AgentEvent]:
+        """以事件流方式执行任务，内部复用同一个 ``run()`` 循环。"""
+
+        queue_handler = _QueueEventHandler()
+        handler: AgentEventHandler = queue_handler
+        if event_handler is not None:
+            handler = CompositeEventHandler(queue_handler, event_handler)
+
+        async def execute() -> None:
+            try:
+                await self.run(
+                    user_input,
+                    history=history,
+                    conversation_id=conversation_id,
+                    event_handler=handler,
+                )
+            finally:
+                await queue_handler.finish()
+
+        task = asyncio.create_task(execute())
         try:
-            return await self._tool_executor.execute(tool_call)
+            while True:
+                item = await queue_handler.next()
+                if item is _STREAM_FINISHED:
+                    break
+                if isinstance(item, AgentEvent):
+                    yield item
+            await task
+        finally:
+            if not task.done():
+                task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
+
+    async def _execute_tool(
+        self,
+        tool_call: ToolCall,
+        *,
+        approval_callback: ApprovalCallback | None = None,
+    ) -> ToolResult:
+        try:
+            return await self._tool_executor.execute(
+                tool_call,
+                approval_callback=approval_callback,
+            )
         except Exception as exc:
             return ToolResult(
                 tool_call_id=tool_call.id,
@@ -217,6 +394,7 @@ class AgentRuntime:
     @staticmethod
     def _result(
         *,
+        run_id: str,
         final_message: Message,
         messages: Sequence[Message],
         steps: int,
@@ -231,6 +409,7 @@ class AgentRuntime:
             complete_messages = (*complete_messages, final_message)
 
         return AgentResult(
+            run_id=run_id,
             final_message=final_message,
             messages=complete_messages,
             steps=steps,
@@ -272,3 +451,63 @@ def _add_usage(total: ModelUsage, current: ModelUsage) -> ModelUsage:
         output_tokens=total.output_tokens + current.output_tokens,
         total_tokens=total.total_tokens + current.total_tokens,
     )
+
+
+class _EventEmitter:
+    """为单次运行补充公共标识、顺序并隔离处理器异常。"""
+
+    def __init__(
+        self,
+        *,
+        handler: AgentEventHandler,
+        run_id: str,
+        conversation_id: str | None,
+    ) -> None:
+        self._handler = handler
+        self._run_id = run_id
+        self._conversation_id = conversation_id
+        self._sequence = 0
+
+    async def emit(
+        self,
+        event_type: AgentEventType,
+        **payload: Any,
+    ) -> None:
+        event = AgentEvent(
+            run_id=self._run_id,
+            conversation_id=self._conversation_id,
+            sequence=self._sequence,
+            type=event_type,
+            **payload,
+        )
+        self._sequence += 1
+        try:
+            await self._handler.emit(event)
+        except Exception:
+            # 事件观察者故障不能中断 Agent 的核心执行流程。
+            return
+
+
+def _provider_name(provider: ModelProvider | str | None) -> str | None:
+    if isinstance(provider, ModelProvider):
+        return provider.value
+    return provider
+
+
+_STREAM_FINISHED = object()
+
+
+class _QueueEventHandler(AgentEventHandler):
+    """把 Runtime 回调事件转交给异步迭代器。"""
+
+    def __init__(self) -> None:
+        self._queue: asyncio.Queue[AgentEvent | object] = asyncio.Queue(maxsize=100)
+
+    async def emit(self, event: AgentEvent) -> None:
+        await self._queue.put(event)
+
+    async def finish(self) -> None:
+        await self._queue.put(_STREAM_FINISHED)
+
+    async def next(self) -> AgentEvent | object:
+        return await self._queue.get()

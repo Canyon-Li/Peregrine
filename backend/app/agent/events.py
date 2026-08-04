@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
@@ -9,8 +10,9 @@ from uuid import uuid4
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.models.types import Message, ModelUsage, ToolCall, ToolResult
+from app.tools.approval import ApprovalDecision
 
-from .result import AgentError, AgentStopReason
+from .result import AgentError, AgentResult, AgentStopReason
 
 
 class AgentEventType(StrEnum):
@@ -22,6 +24,7 @@ class AgentEventType(StrEnum):
     TOOL_STARTED = "tool_started"
     TOOL_COMPLETED = "tool_completed"
     TOOL_APPROVAL_REQUIRED = "tool_approval_required"
+    TOOL_APPROVAL_COMPLETED = "tool_approval_completed"
     AGENT_COMPLETED = "agent_completed"
     AGENT_FAILED = "agent_failed"
 
@@ -46,6 +49,8 @@ class AgentEvent(BaseModel):
     usage: ModelUsage | None = None
     stop_reason: AgentStopReason | None = None
     error: AgentError | None = None
+    result: AgentResult | None = None
+    approval_decision: ApprovalDecision | None = None
 
     @field_validator("run_id")
     @classmethod
@@ -67,4 +72,58 @@ class AgentEvent(BaseModel):
         return value.astimezone(UTC)
 
 
-__all__ = ["AgentEvent", "AgentEventType"]
+class AgentEventHandler(ABC):
+    """接收 Agent 运行事件的异步处理器。"""
+
+    @abstractmethod
+    async def emit(self, event: AgentEvent) -> None:
+        """接收一个已经完成编号的事件。"""
+
+
+class NullEventHandler(AgentEventHandler):
+    """忽略全部事件的默认处理器。"""
+
+    async def emit(self, event: AgentEvent) -> None:
+        pass
+
+
+class InMemoryEventHandler(AgentEventHandler):
+    """在内存中按发射顺序保存事件，主要用于测试和调试。"""
+
+    def __init__(self) -> None:
+        self._events: list[AgentEvent] = []
+
+    async def emit(self, event: AgentEvent) -> None:
+        self._events.append(event)
+
+    @property
+    def events(self) -> tuple[AgentEvent, ...]:
+        return tuple(self._events)
+
+    def clear(self) -> None:
+        self._events.clear()
+
+
+class CompositeEventHandler(AgentEventHandler):
+    """把同一个事件依次发送给多个相互隔离的处理器。"""
+
+    def __init__(self, *handlers: AgentEventHandler) -> None:
+        self._handlers = handlers
+
+    async def emit(self, event: AgentEvent) -> None:
+        for handler in self._handlers:
+            try:
+                await handler.emit(event)
+            except Exception:
+                # 单个观察者故障不影响其他事件消费者。
+                continue
+
+
+__all__ = [
+    "AgentEvent",
+    "AgentEventHandler",
+    "AgentEventType",
+    "CompositeEventHandler",
+    "InMemoryEventHandler",
+    "NullEventHandler",
+]
