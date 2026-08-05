@@ -3,6 +3,7 @@
 from .blocks import (
     BlockType,
     ConversationBlock,
+    MalformedToolBlock,
     MessageBlock,
     SystemBlock,
     ToolRoundBlock,
@@ -21,8 +22,23 @@ from .capabilities import (
     build_model_capability_registry,
 )
 from .config import ContextSettings
-from .history import compact_model_history
-from .manager import ContextDecision, ContextManager
+from .history import compact_model_blocks, compact_model_history
+from .manager import ContextCompactionStage, ContextDecision, ContextManager
+from .reducers import (
+    ConversationReducer,
+    ConversationReductionResult,
+    ToolReducer,
+    ToolReductionResult,
+    build_summary_candidate,
+)
+from .summarizer import ContextSummarizer, ModelContextSummarizer
+from .summary import (
+    SUMMARY_MESSAGE_NAME,
+    ConversationSummaryState,
+    RollingConversationSummary,
+    SummaryGenerationResult,
+)
+from .summary_store import SQLiteConversationSummaryStore
 from .tokens import TokenEstimator, default_token_estimator, model_family
 
 __all__ = [
@@ -30,19 +46,34 @@ __all__ = [
     "CapabilitySource",
     "ContextBudget",
     "ContextBudgetPolicy",
+    "ContextCompactionStage",
     "ContextDecision",
     "ContextManager",
+    "ContextSummarizer",
     "ContextSettings",
     "ConversationBlock",
+    "ConversationReducer",
+    "ConversationReductionResult",
+    "ConversationSummaryState",
     "FALLBACK_CONTEXT_WINDOW",
+    "MalformedToolBlock",
     "MessageBlock",
     "ModelCapabilities",
     "ModelCapabilityRegistry",
+    "ModelContextSummarizer",
+    "RollingConversationSummary",
+    "SUMMARY_MESSAGE_NAME",
     "SystemBlock",
     "TokenEstimator",
     "ToolRoundBlock",
+    "ToolReducer",
+    "ToolReductionResult",
+    "SummaryGenerationResult",
+    "SQLiteConversationSummaryStore",
     "build_budget_policy",
     "build_model_capability_registry",
+    "build_summary_candidate",
+    "compact_model_blocks",
     "compact_model_history",
     "default_token_estimator",
     "model_family",

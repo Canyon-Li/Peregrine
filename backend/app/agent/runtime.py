@@ -9,7 +9,7 @@ from contextlib import suppress
 from typing import Any
 from uuid import uuid4
 
-from app.context import ContextManager
+from app.context import ContextManager, ConversationSummaryState
 from app.models.registry import ModelAdapterRegistry
 from app.models.types import (
     Message,
@@ -110,6 +110,7 @@ class AgentRuntime:
         history: Sequence[Message] = (),
         conversation_id: str | None = None,
         event_handler: AgentEventHandler | None = None,
+        summary_state: ConversationSummaryState | None = None,
     ) -> AgentResult:
         """处理一次用户输入并返回完整的运行结果（AgentResult）。
 
@@ -125,6 +126,7 @@ class AgentRuntime:
                 history=history,
                 conversation_id=conversation_id,
                 event_handler=event_handler,
+                summary_state=summary_state,
             )
         finally:
             with suppress(Exception):
@@ -138,6 +140,7 @@ class AgentRuntime:
         history: Sequence[Message],
         conversation_id: str | None,
         event_handler: AgentEventHandler | None,
+        summary_state: ConversationSummaryState | None,
     ) -> AgentResult:
         """执行一次已分配 Run ID 的 Agent 循环。"""
 
@@ -156,6 +159,7 @@ class AgentRuntime:
         tool_rounds: list[ToolRound] = []
         tool_calls: list[ToolCallRecord] = []
         usage = ModelUsage()
+        current_summary_state = summary_state
 
         await emitter.emit(
             AgentEventType.AGENT_STARTED,
@@ -184,6 +188,7 @@ class AgentRuntime:
                 tool_calls=tool_calls,
                 usage=usage,
                 error=error,
+                summary_state=current_summary_state,
             )
             await emitter.emit(
                 AgentEventType.AGENT_FAILED,
@@ -224,8 +229,7 @@ class AgentRuntime:
                 resolved_model = self._model or adapter.default_model
                 resolved_provider = adapter.provider
                 effective_max_output_tokens = (
-                    self._max_output_tokens
-                    or adapter.config.default_max_output_tokens
+                    self._max_output_tokens or adapter.config.default_max_output_tokens
                 )
             except Exception as exc:
                 return await stop_with_error(
@@ -244,6 +248,7 @@ class AgentRuntime:
                     provider=resolved_provider,
                     max_output_tokens=effective_max_output_tokens,
                     history_count=historical_message_count,
+                    summary_state=current_summary_state,
                 )
             except Exception as exc:
                 return await stop_with_error(
@@ -254,6 +259,8 @@ class AgentRuntime:
                     model=resolved_model,
                 )
 
+            current_summary_state = context_decision.summary_state
+            usage = _add_usage(usage, context_decision.summary_usage)
             request_messages = context_decision.messages
             request_tools = context_decision.tools
             await emitter.emit(
@@ -261,6 +268,10 @@ class AgentRuntime:
                 step=step,
                 provider=resolved_provider,
                 model=resolved_model,
+                original_estimated_input_tokens=(
+                    context_decision.original_estimated_input_tokens
+                ),
+                prepared_input_tokens=context_decision.prepared_input_tokens,
                 estimated_input_tokens=context_decision.estimated_input_tokens,
                 context_trimmed=context_decision.trimmed,
                 context_window=context_decision.context_window,
@@ -271,6 +282,21 @@ class AgentRuntime:
                 requires_compaction=context_decision.requires_compaction,
                 exceeds_input_budget=context_decision.exceeds_input_budget,
                 capability_source=context_decision.capability_source,
+                original_usage_ratio=context_decision.original_usage_ratio,
+                prepared_usage_ratio=context_decision.prepared_usage_ratio,
+                compaction_stage=context_decision.compaction_stage.value,
+                compacted_tool_results=context_decision.compacted_tool_results,
+                removed_tool_rounds=context_decision.removed_tool_rounds,
+                reached_target=context_decision.reached_target,
+                needs_next_compaction_stage=(
+                    context_decision.needs_next_compaction_stage
+                ),
+                summary_updated=context_decision.summary_updated,
+                summarized_conversation_blocks=(
+                    context_decision.summarized_conversation_blocks
+                ),
+                summary_usage=context_decision.summary_usage,
+                summary_error=context_decision.summary_error,
             )
             if context_decision.exceeds_input_budget:
                 return await stop_with_error(
@@ -324,6 +350,7 @@ class AgentRuntime:
                     tool_rounds=tool_rounds,
                     tool_calls=tool_calls,
                     usage=usage,
+                    summary_state=current_summary_state,
                 )
                 await emitter.emit(
                     AgentEventType.AGENT_COMPLETED,
@@ -358,6 +385,7 @@ class AgentRuntime:
                         tool_calls=tool_calls,
                         usage=usage,
                         error=error,
+                        summary_state=current_summary_state,
                     )
                     await emitter.emit(
                         AgentEventType.AGENT_FAILED,
@@ -411,6 +439,7 @@ class AgentRuntime:
             tool_calls=tool_calls,
             usage=usage,
             error=error,
+            summary_state=current_summary_state,
         )
         await emitter.emit(
             AgentEventType.AGENT_FAILED,
@@ -432,6 +461,7 @@ class AgentRuntime:
         history: Sequence[Message] = (),
         conversation_id: str | None = None,
         event_handler: AgentEventHandler | None = None,
+        summary_state: ConversationSummaryState | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """以事件流方式执行任务，内部复用同一个 ``run()`` 循环。"""
 
@@ -447,6 +477,7 @@ class AgentRuntime:
                     history=history,
                     conversation_id=conversation_id,
                     event_handler=handler,
+                    summary_state=summary_state,
                 )
             finally:
                 await queue_handler.finish()
@@ -518,6 +549,7 @@ class AgentRuntime:
         tool_calls: list[ToolCallRecord],
         usage: ModelUsage,
         error: AgentRuntimeError | None = None,
+        summary_state: ConversationSummaryState | None = None,
     ) -> AgentResult:
         complete_messages = tuple(messages)
         if not complete_messages or complete_messages[-1] != final_message:
@@ -537,6 +569,7 @@ class AgentRuntime:
                 if error is not None
                 else None
             ),
+            summary_state=summary_state,
         )
 
     @staticmethod
