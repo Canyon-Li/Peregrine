@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 
@@ -31,13 +32,11 @@ from app.conversation import (
     SQLiteConversationStore,
 )
 from app.memory import (
-    HybridMemoryRetriever,
     MemoryManager,
-    MemorySettings,
-    MemoryWriter,
-    ModelMemoryExtractor,
-    OpenAICompatibleMemoryEmbedder,
-    SQLiteMemoryStore,
+    MemoryRecord,
+    MemoryReflectionConfig,
+    PostRunMemoryReflector,
+    register_memory_tools,
 )
 from app.task import (
     DEFAULT_TASKS_DIR,
@@ -197,6 +196,18 @@ def _print_agent_event(event: AgentEvent) -> None:
         print(
             f"{prefix} 工具权限检查完成：{event.tool_call.name} · {decision}{rule_text}"
         )
+    elif event.type is AgentEventType.MEMORY_REFLECTION_STARTED:
+        print(f"{prefix} 正在整理本轮长期记忆")
+    elif event.type is AgentEventType.MEMORY_REFLECTION_COMPLETED:
+        action = event.reflection_action or "none"
+        suffix = (
+            f" · {event.reflection_memory_id}"
+            if event.reflection_memory_id is not None
+            else ""
+        )
+        print(f"{prefix} 长期记忆整理完成：{action}{suffix}")
+    elif event.type is AgentEventType.MEMORY_REFLECTION_FAILED:
+        print(f"{prefix} 长期记忆整理失败，已跳过")
     elif event.type is AgentEventType.AGENT_COMPLETED:
         print(f"{prefix} Agent 执行完成")
     elif event.type is AgentEventType.AGENT_FAILED:
@@ -351,6 +362,31 @@ async def _remove_permission_rule(
     return await store.remove(matched[0].id)
 
 
+def _print_memories(memories: Sequence[MemoryRecord]) -> None:
+    """输出适合终端快速浏览的长期记忆列表（Recall Cue）。"""
+
+    if not memories:
+        print("没有长期记忆。")
+        return
+    for memory in memories:
+        cue = " ".join(memory.summary.split())
+        print(f"{memory.id}  [{memory.status.value}]  {memory.title}")
+        print(f"  Cue: {cue}")
+
+
+def _print_memory(memory: MemoryRecord) -> None:
+    """输出单条长期记忆的完整内容。"""
+
+    print(
+        f"ID: {memory.id}\n"
+        f"状态: {memory.status.value}\n"
+        f"标题: {memory.title}\n"
+        f"访问次数: {memory.access_count}\n"
+        f"创建时间: {memory.created_at.astimezone().isoformat()}\n"
+        f"内容:\n{memory.render_full()}"
+    )
+
+
 async def _run(args: argparse.Namespace) -> int:
     settings = ModelSettings()
     try:
@@ -412,37 +448,26 @@ async def _run(args: argparse.Namespace) -> int:
             print("联网搜索：DuckDuckGo（配置 TAVILY_API_KEY 可启用 Tavily）")
 
     registry = ModelAdapterRegistry(settings)
-    memory_settings = MemorySettings()
-    memory_manager: MemoryManager | None = None
-    try:
-        if memory_settings.memory_enabled:
-            memory_embedder = OpenAICompatibleMemoryEmbedder(
-                api_key=memory_settings.api_key_value(),
-                base_url=memory_settings.memory_embedding_base_url or None,
-                model=memory_settings.memory_embedding_model,
-                dimensions=memory_settings.memory_embedding_dimensions,
-            )
-            memory_store = SQLiteMemoryStore(
-                args.database,
-                embedding_dimensions=memory_embedder.dimensions,
-            )
-            await memory_store.initialize()
-            memory_manager = MemoryManager(
-                writer=MemoryWriter(memory_store, memory_embedder),
-                retriever=HybridMemoryRetriever(memory_store, memory_embedder),
-                extractor=ModelMemoryExtractor(
-                    registry,
-                    provider=provider.value,
-                    model=args.model,
-                ),
-            )
-            print(
-                "长期记忆：已启用 SQLite + FTS5 + sqlite-vec "
-                f"({memory_settings.memory_embedding_model})"
-            )
-    except (RuntimeError, ValueError) as exc:
-        print(f"记忆配置错误：{exc}", file=sys.stderr)
-        return 2
+    memory_manager = MemoryManager()
+    await memory_manager.initialize()
+    register_memory_tools(tool_registry, memory_manager)
+    reflection_config = MemoryReflectionConfig()
+    memory_reflector = PostRunMemoryReflector(
+        registry,
+        memory_manager,
+        config=reflection_config,
+        default_provider=provider.value,
+        default_model=model,
+    )
+    reflection_model = memory_reflector.model_hint or "未解析"
+    reflection_provider = memory_reflector.provider_hint or "未解析"
+    reflection_status = "启用" if reflection_config.enabled else "关闭"
+    print(
+        "长期记忆：Sparse Memory（在线 Recall + 显式 Core + Post-Run Reflection）"
+    )
+    print(
+        f"记忆反思：{reflection_status} · {reflection_provider}/{reflection_model}"
+    )
     context_settings = ContextSettings()
     context_summarizer = ModelContextSummarizer(
         registry,
@@ -478,8 +503,7 @@ async def _run(args: argparse.Namespace) -> int:
         task_context_provider=TaskContextProvider(task_store),
         checkpoint_store=checkpoint_store,
         memory_manager=memory_manager,
-        memory_namespaces=memory_settings.parsed_namespaces(),
-        memory_write_namespace=memory_settings.memory_write_namespace,
+        memory_reflector=memory_reflector,
     )
     try:
         if args.message is not None:
@@ -528,6 +552,20 @@ async def _run(args: argparse.Namespace) -> int:
                     await conversation_store.list(),
                     conversation.id,
                 )
+                continue
+            if content == "/memories" or content.startswith("/memories "):
+                _print_memories(await memory_manager.list())
+                continue
+            if content == "/memory" or content.startswith("/memory "):
+                identifier = content.removeprefix("/memory").strip()
+                if not identifier:
+                    print("用法：/memory <记忆ID>")
+                    continue
+                memory = await memory_manager.read(identifier)
+                if memory is None:
+                    print(f"找不到记忆：{identifier}")
+                    continue
+                _print_memory(memory)
                 continue
             if content == "/permissions":
                 rules = await rule_store.list(scope_ids=(conversation.id,))

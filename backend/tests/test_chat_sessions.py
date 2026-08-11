@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import pytest
 
@@ -13,9 +14,12 @@ from app.context import (
     SQLiteConversationSummaryStore,
 )
 from app.conversation import SQLiteConversationStore
+from app.memory import MemoryRecord
 from app.models.chat import (
     _load_or_create_conversation,
     _parse_args,
+    _print_memories,
+    _print_memory,
     _print_permission_rules,
     _remove_permission_rule,
     _send_message,
@@ -353,3 +357,26 @@ def test_cli_accepts_explicit_output_tokens(monkeypatch) -> None:
     args = _parse_args()
 
     assert args.max_output_tokens == 8192
+
+
+def test_cli_prints_memory_list_and_details(capsys) -> None:
+    now = datetime.now(UTC)
+    memory = MemoryRecord(
+        id="M001",
+        title="Peregrine 使用 SQLite 历史",
+        summary="旧的 SQLite 记忆架构说明",
+        content="Peregrine 不再使用 SQLite + Embedding 作为长期记忆。",
+        created_at=now,
+        updated_at=now,
+        last_accessed_at=now,
+        access_count=3,
+    )
+
+    _print_memories((memory,))
+    _print_memory(memory)
+
+    output = capsys.readouterr().out
+    assert "M001" in output
+    assert "[active]" in output
+    assert "Peregrine 使用 SQLite 历史" in output
+    assert "访问次数: 3" in output

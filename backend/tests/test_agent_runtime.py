@@ -31,7 +31,13 @@ from app.context import (
     RollingConversationSummary,
     SummaryGenerationResult,
 )
-from app.memory import MEMORY_CONTEXT_MESSAGE_NAME
+from app.memory import (
+    CORE_MEMORY_MESSAGE_NAME,
+    MEMORY_INDEX_MESSAGE_NAME,
+    MEMORY_POLICY_MESSAGE_NAME,
+    MemoryManager,
+    register_memory_tools,
+)
 from app.models.adapter import ModelAdapter
 from app.models.config import ModelSettings, ProviderConfig
 from app.models.registry import ModelAdapterRegistry
@@ -173,21 +179,29 @@ class FailingEventHandler(AgentEventHandler):
 
 
 class FakeMemoryManager:
-    """验证 Runtime 只依赖 Memory 门面，不接触检索实现。"""
+    """验证 Runtime 只依赖 Memory 门面（CORE+INDEX+Policy 注入）。"""
 
     def __init__(self) -> None:
-        self.observations: list[tuple[str, str, object]] = []
-
-    async def context_message(self, query, *, namespaces):
-        return Message(
-            role=MessageRole.SYSTEM,
-            name=MEMORY_CONTEXT_MESSAGE_NAME,
-            content="用户偏好中文",
+        self.messages = (
+            Message(
+                role=MessageRole.SYSTEM,
+                name=CORE_MEMORY_MESSAGE_NAME,
+                content="# Core Memory\n\n用户偏好中文",
+            ),
+            Message(
+                role=MessageRole.SYSTEM,
+                name=MEMORY_INDEX_MESSAGE_NAME,
+                content="# Long-term Memory Index\n\n[M001] demo\nCue: demo",
+            ),
+            Message(
+                role=MessageRole.SYSTEM,
+                name=MEMORY_POLICY_MESSAGE_NAME,
+                content="Long-term memory is intentionally sparse.",
+            ),
         )
 
-    async def observe(self, observation, *, namespace, source, explicit_user_text=None):
-        self.observations.append((observation, namespace, source))
-        return ()
+    async def context_messages(self) -> tuple[Message, ...]:
+        return self.messages
 
 
 class BlockingModelAdapter(ModelAdapter):
@@ -1256,31 +1270,94 @@ async def test_runtime_injects_interrupted_checkpoint_without_persisting_it(
 
 
 @pytest.mark.asyncio
-async def test_runtime_recalls_and_observes_memory_without_persisting_context() -> None:
+async def test_runtime_injects_memory_context_without_persisting() -> None:
     registry, adapter = fake_registry([model_response(content="我会使用中文回答")])
     memory = FakeMemoryManager()
-    result = await AgentRuntime(
+    runtime = AgentRuntime(
         registry,
         ToolRegistry(),
         provider="fake",
         memory_manager=memory,
-        memory_namespaces=("user:local", "project:peregrine"),
-        memory_write_namespace="user:local",
-    ).run("继续回答", conversation_id="conv-1")
+    )
+    result = await runtime.run("继续回答", conversation_id="conv-1")
 
-    injected = next(
-        message
-        for message in adapter.requests[0].messages
-        if message.name == MEMORY_CONTEXT_MESSAGE_NAME
-    )
-    assert injected.content == "用户偏好中文"
+    request_names = [
+        message.name for message in adapter.requests[0].messages
+    ]
+    assert CORE_MEMORY_MESSAGE_NAME in request_names
+    assert MEMORY_INDEX_MESSAGE_NAME in request_names
+    assert MEMORY_POLICY_MESSAGE_NAME in request_names
+    # 记忆上下文只是请求视图，不进入最终结果（不持久化）。
     assert not any(
-        message.name == MEMORY_CONTEXT_MESSAGE_NAME for message in result.messages
+        message.name in {
+            CORE_MEMORY_MESSAGE_NAME,
+            MEMORY_INDEX_MESSAGE_NAME,
+            MEMORY_POLICY_MESSAGE_NAME,
+        }
+        for message in result.messages
     )
-    assert len(memory.observations) == 1
-    observation, namespace, source = memory.observations[0]
-    assert "继续回答" in observation
-    assert "我会使用中文回答" in observation
-    assert namespace == "user:local"
-    assert source.session_id == "conv-1"
-    assert source.run_id == result.run_id
+
+
+@pytest.mark.asyncio
+async def test_runtime_core_update_uses_current_user_and_next_run_loads_it(
+    tmp_path,
+) -> None:
+    statement = "以后都使用中文和我交流"
+    core_call = ToolCall(
+        id="core-update-1",
+        name="core_memory.update",
+        arguments={
+            "key": "communication.language",
+            "value": "始终使用中文交流。",
+            "reason": "用户明确表达全局长期偏好",
+            "explicit_user_statement": statement,
+        },
+    )
+    registry, adapter = fake_registry(
+        [
+            model_response(tool_calls=(core_call,)),
+            model_response(content="已经记住你的长期偏好。"),
+            model_response(content="你好，我会继续使用中文。"),
+        ]
+    )
+    memory = MemoryManager(tmp_path / "memory")
+    await memory.initialize()
+    tools = ToolRegistry()
+    register_memory_tools(tools, memory)
+    runtime = AgentRuntime(
+        registry,
+        tools,
+        provider="fake",
+        memory_manager=memory,
+    )
+
+    first = await runtime.run(f"请记住，{statement}。")
+    second = await runtime.run("你好")
+
+    assert first.tool_calls[0].result.success is True
+    assert second.content == "你好，我会继续使用中文。"
+    injected_core = next(
+        message
+        for message in adapter.requests[2].messages
+        if message.name == CORE_MEMORY_MESSAGE_NAME
+    )
+    assert "始终使用中文交流" in (injected_core.content or "")
+
+
+@pytest.mark.asyncio
+async def test_memory_context_failure_does_not_block_agent_result() -> None:
+    registry, _ = fake_registry([model_response(content="最终回答")])
+
+    class FailingMemoryManager:
+        async def context_messages(self) -> tuple[Message, ...]:
+            raise RuntimeError("memory unavailable")
+
+    runtime = AgentRuntime(
+        registry,
+        ToolRegistry(),
+        provider="fake",
+        memory_manager=FailingMemoryManager(),
+    )
+
+    result = await asyncio.wait_for(runtime.run("继续"), timeout=5)
+    assert result.content == "最终回答"
