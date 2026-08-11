@@ -1,4 +1,4 @@
-"""正常 Agent Run 结束后的普通长期记忆反思与单动作写入。"""
+"""正常 Agent Run 结束后的普通长期记忆决策。"""
 
 from __future__ import annotations
 
@@ -9,12 +9,10 @@ import time
 from app.models.registry import ModelAdapterRegistry
 from app.models.types import Message, MessageRole, ModelRequest, ModelUsage
 
-from .manager import MemoryManager
 from .reflection_models import (
     MemoryReflectionConfig,
     MemoryReflectionInput,
-    MemoryReflectionOutcome,
-    ReflectionAction,
+    MemoryReflectionProposal,
     ReflectionDecision,
 )
 
@@ -38,24 +36,23 @@ Return strict JSON and no markdown fence:
 {"action":"none|create|update","memory_id":null,"title":null,
 "summary":null,"content":null,"reason":"..."}
 
-CREATE requires title, summary, content. UPDATE requires memory_id and complete
-replacement content. NONE must leave all mutation fields null."""
+CREATE requires title, summary, content. UPDATE requires memory_id plus the
+complete replacement title, summary, and content so the recall cue stays aligned
+with the body. NONE must leave all mutation fields null."""
 
 
 class PostRunMemoryReflector:
-    """调用可独立配置的模型，并通过 MemoryManager 应用至多一个 mutation。"""
+    """调用可独立配置的模型，只生成普通 Memory 单动作决策。"""
 
     def __init__(
         self,
         registry: ModelAdapterRegistry,
-        manager: MemoryManager,
         *,
         config: MemoryReflectionConfig | None = None,
         default_provider: str | None = None,
         default_model: str | None = None,
     ) -> None:
         self._registry = registry
-        self._manager = manager
         self.config = config or MemoryReflectionConfig()
         self._default_provider = default_provider
         self._default_model = default_model
@@ -79,20 +76,18 @@ class PostRunMemoryReflector:
         except Exception:
             return None
 
-    async def run(
+    async def decide(
         self,
         reflection_input: MemoryReflectionInput,
-    ) -> MemoryReflectionOutcome:
-        """执行一次同步 Reflection；所有失败均转成隔离后的 Outcome。"""
+    ) -> MemoryReflectionProposal:
+        """生成严格决策；所有模型与解析失败均转成隔离结果。"""
 
         if not self.config.enabled:
-            return MemoryReflectionOutcome(triggered=False)
+            return MemoryReflectionProposal()
         started = time.perf_counter()
         usage = ModelUsage()
         provider = self.provider_hint
         model = self.model_hint
-        action: ReflectionAction | None = None
-        memory_id: str | None = None
         try:
             adapter = self._registry.get(provider)
             provider = adapter.provider
@@ -126,61 +121,21 @@ class PostRunMemoryReflector:
             decision = ReflectionDecision.model_validate_json(
                 _strip_code_fence(response.message.content)
             )
-            action = decision.action
-            if action is ReflectionAction.UPDATE:
-                memory_id = decision.memory_id
-            if (
-                action is ReflectionAction.UPDATE
-                and decision.memory_id not in reflection_input.recalled_memory_ids
-            ):
-                raise ValueError(
-                    "reflection update requires memory.read success in current run"
-                )
-            memory_id = await self._apply(decision)
-            maintenance_required = await self._manager.maintenance_required()
-            candidate_ids: tuple[str, ...] = ()
-            if maintenance_required:
-                candidates = await self._manager.retention_candidates()
-                candidate_ids = tuple(item.id for item in candidates)
-            return MemoryReflectionOutcome(
-                triggered=True,
-                action=action,
+            return MemoryReflectionProposal(
+                decision=decision,
                 provider=provider,
                 model=model,
                 duration_ms=(time.perf_counter() - started) * 1000,
                 usage=usage,
-                memory_id=memory_id,
-                maintenance_required=maintenance_required,
-                retention_candidate_ids=candidate_ids,
             )
         except Exception as exc:
-            return MemoryReflectionOutcome(
-                triggered=True,
-                action=action,
+            return MemoryReflectionProposal(
                 provider=provider,
                 model=model,
                 duration_ms=(time.perf_counter() - started) * 1000,
                 usage=usage,
                 error=f"{type(exc).__name__}: {exc}",
-                memory_id=memory_id,
             )
-
-    async def _apply(self, decision: ReflectionDecision) -> str | None:
-        if decision.action is ReflectionAction.NONE:
-            return None
-        if decision.action is ReflectionAction.CREATE:
-            record = await self._manager.create(
-                title=decision.title or "",
-                summary=decision.summary or "",
-                content=decision.content or "",
-            )
-            return record.id
-        record = await self._manager.update(
-            decision.memory_id or "",
-            content=decision.content or "",
-            reason=decision.reason,
-        )
-        return record.id
 
 
 def _strip_code_fence(content: str) -> str:

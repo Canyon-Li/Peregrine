@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from pathlib import Path
 
 import pytest
@@ -44,16 +44,20 @@ class FakeAdapter(ModelAdapter):
         responses: Sequence[ModelResponse | Exception],
         *,
         delay_seconds: float = 0.0,
+        before_return: Callable[[], Awaitable[None]] | None = None,
     ) -> None:
         super().__init__(config)
         self.responses = list(responses)
         self.delay_seconds = delay_seconds
+        self.before_return = before_return
         self.requests: list[ModelRequest] = []
 
     async def complete(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request)
         if self.delay_seconds:
             await asyncio.sleep(self.delay_seconds)
+        if self.before_return is not None:
+            await self.before_return()
         response = self.responses.pop(0)
         if isinstance(response, Exception):
             raise response
@@ -139,14 +143,14 @@ async def test_reflection_noop_does_not_mutate_store(tmp_path: Path) -> None:
     )
     reflector = PostRunMemoryReflector(
         _registry(reflect=adapter),
-        manager,
         config=_reflection_config(),
     )
 
-    outcome = await reflector.run(_input())
+    proposal = await reflector.decide(_input())
 
-    assert outcome.action is ReflectionAction.NONE
-    assert outcome.error is None
+    assert proposal.decision is not None
+    assert proposal.decision.action is ReflectionAction.NONE
+    assert proposal.error is None
     assert await manager.store.count_active() == 0
 
 
@@ -165,16 +169,26 @@ async def test_reflection_create_uses_manager_and_rebuilds_index(
         _config("reflect", "reflection-model"),
         [_response(decision)],
     )
+    main = FakeAdapter(
+        _config("main", "main-model"),
+        [_response("主任务完成", provider="main", model="main-model")],
+    )
+    registry = _registry(main=main, reflect=adapter)
     reflector = PostRunMemoryReflector(
-        _registry(reflect=adapter),
-        manager,
+        registry,
         config=_reflection_config(),
     )
+    runtime = AgentRuntime(
+        registry,
+        ToolRegistry(),
+        provider="main",
+        memory_manager=manager,
+        memory_reflector=reflector,
+    )
 
-    outcome = await reflector.run(_input())
+    result = await runtime.run("完成记忆架构调整")
 
-    assert outcome.action is ReflectionAction.CREATE
-    assert outcome.memory_id == "M001"
+    assert result.ok is True
     record = await manager.store.load("M001")
     assert record is not None
     assert "Post-Run Reflector" in record.content
@@ -184,7 +198,7 @@ async def test_reflection_create_uses_manager_and_rebuilds_index(
 
 
 @pytest.mark.asyncio
-async def test_reflection_update_uses_manager_and_rebuilds_index(
+async def test_reflection_update_decision_does_not_write_store(
     tmp_path: Path,
 ) -> None:
     manager = await _manager(tmp_path / "memory")
@@ -196,6 +210,8 @@ async def test_reflection_update_uses_manager_and_rebuilds_index(
     (manager.memory_dir / "INDEX.md").write_text("stale", encoding="utf-8")
     decision = (
         '{"action":"update","memory_id":"m001",'
+        '"title":"Memory 架构决定",'
+        '"summary":"普通记忆由运行后反思统一沉淀",'
         '"content":"新决定：普通记忆改由 Post-Run Reflector 写入。",'
         '"reason":"本轮改变了已有架构决定"}'
     )
@@ -205,18 +221,20 @@ async def test_reflection_update_uses_manager_and_rebuilds_index(
     )
     reflector = PostRunMemoryReflector(
         _registry(reflect=adapter),
-        manager,
         config=_reflection_config(),
     )
 
-    outcome = await reflector.run(_input(recalled_memory_ids=(record.id,)))
+    proposal = await reflector.decide(
+        _input(recalled_memory_ids=(record.id,))
+    )
 
-    assert outcome.action is ReflectionAction.UPDATE
-    assert outcome.memory_id == record.id
+    assert proposal.decision is not None
+    assert proposal.decision.action is ReflectionAction.UPDATE
+    assert proposal.decision.memory_id == record.id
     updated = await manager.store.load(record.id)
     assert updated is not None
-    assert "Post-Run Reflector" in updated.content
-    assert "Markdown Memory 架构" in (await manager.index.load() or "")
+    assert updated.content == "旧决定"
+    assert await manager.index.load() == "stale"
 
 
 @pytest.mark.asyncio
@@ -237,23 +255,42 @@ async def test_reflection_update_requires_current_run_memory_read(
         [
             _response(
                 '{"action":"update","memory_id":"M001",'
+                '"title":"已有决定",'
+                '"summary":"模型根据 cue 猜测的错误更新",'
                 '"content":"模型根据 cue 猜测的替代正文",'
                 '"reason":"错误地尝试更新"}'
             )
         ],
     )
+    main = FakeAdapter(
+        _config("main", "main-model"),
+        [_response("任务完成", provider="main", model="main-model")],
+    )
+    registry = _registry(main=main, reflect=adapter)
     reflector = PostRunMemoryReflector(
-        _registry(reflect=adapter),
-        manager,
+        registry,
         config=_reflection_config(),
     )
+    events = InMemoryEventHandler()
+    runtime = AgentRuntime(
+        registry,
+        ToolRegistry(),
+        provider="main",
+        memory_manager=manager,
+        memory_reflector=reflector,
+    )
 
-    outcome = await reflector.run(_input())
+    result = await runtime.run("没有读取旧记忆", event_handler=events)
 
-    assert outcome.action is ReflectionAction.UPDATE
-    assert outcome.error is not None
-    assert outcome.memory_id == record.id
-    assert "memory.read success" in outcome.error
+    assert result.ok is True
+    failed = next(
+        event
+        for event in events.events
+        if event.type is AgentEventType.MEMORY_REFLECTION_FAILED
+    )
+    assert failed.reflection_memory_id == record.id
+    assert failed.reflection_error is not None
+    assert "memory.read success" in failed.reflection_error
     assert (
         manager.memory_dir / "active" / f"{record.id}.md"
     ).read_text(encoding="utf-8") == before
@@ -283,14 +320,12 @@ async def test_reflection_failures_are_isolated(
     )
     reflector = PostRunMemoryReflector(
         _registry(reflect=adapter),
-        manager,
         config=_reflection_config(timeout_seconds=timeout_seconds),
     )
 
-    outcome = await reflector.run(_input())
+    proposal = await reflector.decide(_input())
 
-    assert outcome.triggered is True
-    assert outcome.error is not None and error_text in outcome.error
+    assert proposal.error is not None and error_text in proposal.error
     assert await manager.store.count_active() == 0
 
 
@@ -316,7 +351,6 @@ async def test_runtime_final_answer_triggers_independent_reflection_model(
     registry = _registry(main=main, reflect=reflect)
     reflector = PostRunMemoryReflector(
         registry,
-        manager,
         config=_reflection_config(
             model="cheap-memory-model",
             max_output_tokens=321,
@@ -367,6 +401,7 @@ async def test_runtime_successful_memory_read_authorizes_reflection_update(
         summary="Peregrine 的长期记忆方向",
         content="旧方向",
     )
+    (manager.memory_dir / "INDEX.md").write_text("stale", encoding="utf-8")
     main = FakeAdapter(
         _config("main", "main-model"),
         [
@@ -393,6 +428,8 @@ async def test_runtime_successful_memory_read_authorizes_reflection_update(
         [
             _response(
                 '{"action":"update","memory_id":"M001",'
+                '"title":"项目长期记忆方向",'
+                '"summary":"普通记忆由运行后反思模型沉淀",'
                 '"content":"新方向：普通记忆由运行后反思模型沉淀。",'
                 '"reason":"本轮更新了已有架构决定"}'
             )
@@ -408,7 +445,6 @@ async def test_runtime_successful_memory_read_authorizes_reflection_update(
         memory_manager=manager,
         memory_reflector=PostRunMemoryReflector(
             registry,
-            manager,
             config=_reflection_config(),
         ),
     )
@@ -418,14 +454,100 @@ async def test_runtime_successful_memory_read_authorizes_reflection_update(
     assert result.ok is True
     updated = await manager.store.load(record.id)
     assert updated is not None
+    assert updated.title == "项目长期记忆方向"
+    assert updated.summary == "普通记忆由运行后反思模型沉淀"
     assert "运行后反思模型" in updated.content
+    assert "普通记忆由运行后反思模型沉淀" in (
+        await manager.index.load() or ""
+    )
+
+
+@pytest.mark.asyncio
+async def test_runtime_rejects_reflection_update_after_concurrent_change(
+    tmp_path: Path,
+) -> None:
+    manager = await _manager(tmp_path / "memory")
+    record = await manager.create(
+        title="项目方向",
+        summary="旧方向",
+        content="初始正文",
+    )
+
+    async def concurrent_update() -> None:
+        await manager.update(
+            record.id,
+            title="并发更新标题",
+            summary="并发更新 cue",
+            content="另一个 Run 已经更新",
+            reason="并发测试",
+        )
+
+    main = FakeAdapter(
+        _config("main", "main-model"),
+        [
+            ModelResponse(
+                id="read-response",
+                provider="main",
+                model="main-model",
+                message=Message(
+                    role=MessageRole.ASSISTANT,
+                    tool_calls=(
+                        ToolCall(
+                            id="read-memory-1",
+                            name="memory.read",
+                            arguments={"memory_id": record.id},
+                        ),
+                    ),
+                ),
+            ),
+            _response("主任务完成", provider="main", model="main-model"),
+        ],
+    )
+    reflect = FakeAdapter(
+        _config("reflect", "reflection-model"),
+        [
+            _response(
+                '{"action":"update","memory_id":"M001",'
+                '"title":"过期标题","summary":"过期 cue",'
+                '"content":"基于旧 revision 的正文",'
+                '"reason":"模拟过期更新"}'
+            )
+        ],
+        before_return=concurrent_update,
+    )
+    registry = _registry(main=main, reflect=reflect)
+    tools = ToolRegistry()
+    register_memory_tools(tools, manager)
+    events = InMemoryEventHandler()
+    runtime = AgentRuntime(
+        registry,
+        tools,
+        provider="main",
+        memory_manager=manager,
+        memory_reflector=PostRunMemoryReflector(
+            registry,
+            config=_reflection_config(),
+        ),
+    )
+
+    result = await runtime.run("读取并更新已有方向", event_handler=events)
+
+    assert result.ok is True
+    current = await manager.store.load(record.id)
+    assert current is not None
+    assert current.content == "另一个 Run 已经更新"
+    failed = next(
+        event
+        for event in events.events
+        if event.type is AgentEventType.MEMORY_REFLECTION_FAILED
+    )
+    assert failed.reflection_error is not None
+    assert "revision conflict" in failed.reflection_error
 
 
 @pytest.mark.asyncio
 async def test_reflection_provider_only_uses_that_adapters_default_model(
-    tmp_path: Path,
 ) -> None:
-    manager = await _manager(tmp_path / "memory")
     reflect = FakeAdapter(
         _config("reflect", "provider-default-model"),
         [_response('{"action":"none","reason":"没有新记忆"}')],
@@ -433,7 +555,6 @@ async def test_reflection_provider_only_uses_that_adapters_default_model(
     registry = _registry(reflect=reflect)
     reflector = PostRunMemoryReflector(
         registry,
-        manager,
         config=MemoryReflectionConfig(
             _env_file=None,
             provider="reflect",
@@ -443,10 +564,10 @@ async def test_reflection_provider_only_uses_that_adapters_default_model(
         default_model="main-model-must-not-leak",
     )
 
-    outcome = await reflector.run(_input())
+    proposal = await reflector.decide(_input())
 
-    assert outcome.error is None
-    assert outcome.model == "provider-default-model"
+    assert proposal.error is None
+    assert proposal.model == "provider-default-model"
     assert reflect.requests[0].model == "provider-default-model"
 
 
@@ -482,7 +603,6 @@ async def test_runtime_reflection_failure_does_not_change_success_result(
         memory_manager=manager,
         memory_reflector=PostRunMemoryReflector(
             registry,
-            manager,
             config=_reflection_config(),
         ),
     )
@@ -516,7 +636,6 @@ async def test_runtime_model_error_skips_reflection(tmp_path: Path) -> None:
         memory_manager=manager,
         memory_reflector=PostRunMemoryReflector(
             registry,
-            manager,
             config=_reflection_config(),
         ),
     )
@@ -560,7 +679,6 @@ async def test_runtime_max_steps_skips_reflection(tmp_path: Path) -> None:
         memory_manager=manager,
         memory_reflector=PostRunMemoryReflector(
             registry,
-            manager,
             config=_reflection_config(),
         ),
     )
@@ -571,38 +689,3 @@ async def test_runtime_max_steps_skips_reflection(tmp_path: Path) -> None:
     assert reflect.requests == []
     assert events.events[-2].type is AgentEventType.MEMORY_REFLECTION_SKIPPED
     assert events.events[-1].type is AgentEventType.AGENT_FAILED
-
-
-@pytest.mark.asyncio
-async def test_reflection_26th_create_uses_existing_maintenance_signal(
-    tmp_path: Path,
-) -> None:
-    manager = await _manager(tmp_path / "memory")
-    for index in range(25):
-        await manager.create(
-            title=f"记忆 {index}",
-            summary=f"cue {index}",
-            content="正文",
-        )
-    adapter = FakeAdapter(
-        _config("reflect", "reflection-model"),
-        [
-            _response(
-                '{"action":"create","title":"第 26 条",'
-                '"summary":"触发现有维护信号","content":"新正文",'
-                '"reason":"耐久信息"}'
-            )
-        ],
-    )
-    reflector = PostRunMemoryReflector(
-        _registry(reflect=adapter),
-        manager,
-        config=_reflection_config(),
-    )
-
-    outcome = await reflector.run(_input())
-
-    assert outcome.action is ReflectionAction.CREATE
-    assert await manager.store.count_active() == 26
-    assert outcome.maintenance_required is True
-    assert outcome.retention_candidate_ids
