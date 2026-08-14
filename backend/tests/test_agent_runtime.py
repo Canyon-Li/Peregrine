@@ -258,6 +258,30 @@ def fake_registry(
 
 
 @pytest.mark.asyncio
+async def test_runtime_removes_legacy_date_without_injecting_current_time() -> None:
+    registry, adapter = fake_registry([model_response(content="完成")])
+    old_system = Message(
+        role=MessageRole.SYSTEM,
+        content="你是助理。当前日期是 2026-08-04。请准确回答。",
+    )
+
+    result = await AgentRuntime(registry, ToolRegistry(), provider="fake").run(
+        "明天是几号？",
+        history=(old_system,),
+    )
+
+    request = adapter.requests[0]
+    persisted_system = request.messages[0]
+    assert "2026-08-04" not in (persisted_system.content or "")
+    assert not any(
+        message.name == "peregrine_runtime_environment"
+        or "当前本地日期时间：" in (message.content or "")
+        for message in request.messages
+    )
+    assert result.messages[0] == old_system
+
+
+@pytest.mark.asyncio
 async def test_runtime_reads_then_writes_and_returns_final_text(tmp_path) -> None:
     (tmp_path / "input.txt").write_text(
         "Peregrine 可以调用本地工具完成文件任务。",
@@ -520,7 +544,11 @@ async def test_runtime_sends_compressed_copy_but_returns_complete_raw_history() 
     )
     context_manager = ContextManager(
         registry=capability_registry,
-        budget_policy=ContextBudgetPolicy(safety_margin_tokens=0),
+        budget_policy=ContextBudgetPolicy(
+            safety_margin_tokens=0,
+            working_trigger_ratio=0.90,
+            working_target_ratio=0.70,
+        ),
         context_settings=ContextSettings(
             _env_file=None,
             context_keep_recent_tool_rounds=2,

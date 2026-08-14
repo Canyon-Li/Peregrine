@@ -9,6 +9,7 @@ from pydantic import SecretStr
 
 from app.context import (
     ContextManager,
+    ContextSettings,
     ContextSummarizer,
     ConversationReducer,
     ConversationSummaryState,
@@ -29,6 +30,7 @@ from app.models.types import (
     ModelRequest,
     ModelResponse,
     ModelUsage,
+    ToolCall,
 )
 
 
@@ -151,6 +153,22 @@ def _estimate(messages: tuple[Message, ...]) -> int:
     return sum(20 + len(message.content or "") for message in messages)
 
 
+def _tool_round(call_id: str) -> tuple[Message, Message]:
+    return (
+        Message(
+            role=MessageRole.ASSISTANT,
+            tool_calls=(
+                ToolCall(id=call_id, name="read_file", arguments={"path": "x"}),
+            ),
+        ),
+        Message(
+            role=MessageRole.TOOL,
+            content=f"工具结果 {call_id}",
+            tool_call_id=call_id,
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_context_below_trigger_does_not_call_summarizer() -> None:
     summarizer = FakeSummarizer()
@@ -166,6 +184,72 @@ async def test_context_below_trigger_does_not_call_summarizer() -> None:
     assert decision.messages == messages
     assert decision.summary_updated is False
     assert summarizer.calls == []
+
+
+@pytest.mark.asyncio
+async def test_conversation_block_limit_triggers_summary_below_token_line() -> None:
+    history = _history(3)
+    current = (Message(role=MessageRole.USER, content="继续"),)
+    summarizer = FakeSummarizer()
+    manager = ContextManager(
+        context_settings=ContextSettings(
+            _env_file=None,
+            context_preferred_input_tokens=100_000,
+            context_max_unsummarized_conversation_blocks=2,
+        ),
+        conversation_reducer=ConversationReducer(
+            summarizer,
+            keep_recent_conversation_blocks=1,
+            keep_recent_tool_rounds=0,
+        ),
+    )
+
+    decision = await manager.prepare(
+        (*history, *current),
+        history_count=len(history),
+    )
+
+    assert decision.original_estimated_input_tokens < decision.trigger_tokens
+    assert decision.conversation_block_triggered is True
+    assert decision.unsummarized_conversation_blocks == 3
+    assert decision.summary_updated is True
+    assert decision.summary_state is not None
+    assert len(summarizer.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_summary_watermark_prevents_resummarizing_same_history() -> None:
+    history = _history(3)
+    current = (Message(role=MessageRole.USER, content="继续"),)
+    summarizer = FakeSummarizer()
+    settings = ContextSettings(
+        _env_file=None,
+        context_preferred_input_tokens=100_000,
+        context_max_unsummarized_conversation_blocks=2,
+    )
+    manager = ContextManager(
+        context_settings=settings,
+        conversation_reducer=ConversationReducer(
+            summarizer,
+            keep_recent_conversation_blocks=1,
+            keep_recent_tool_rounds=0,
+        ),
+    )
+    first = await manager.prepare(
+        (*history, *current),
+        history_count=len(history),
+    )
+
+    second = await manager.prepare(
+        (*history, *current),
+        history_count=len(history),
+        summary_state=first.summary_state,
+    )
+
+    assert first.summary_state is not None
+    assert second.summary_updated is False
+    assert second.unsummarized_conversation_blocks == 1
+    assert len(summarizer.calls) == 1
 
 
 @pytest.mark.asyncio
@@ -198,6 +282,81 @@ async def test_conversation_reducer_summarizes_old_prefix_and_keeps_recent() -> 
     assert result.messages[-5:] == (*history[-4:], *current)
     assert result.messages[1].name == "peregrine_rolling_summary"
     assert len(summarizer.calls[0][1]) == 8
+
+
+@pytest.mark.asyncio
+async def test_stale_tool_rounds_do_not_block_later_summary() -> None:
+    stale_tools = (*_tool_round("old-1"), *_tool_round("old-2"))
+    conversations = _history(7)[1:]
+    history = (
+        Message(role=MessageRole.SYSTEM, content="主系统提示"),
+        *stale_tools,
+        *conversations,
+    )
+    current = (Message(role=MessageRole.USER, content="当前问题"),)
+    prepared = (*history, *current)
+    summarizer = FakeSummarizer()
+
+    result = await ConversationReducer(
+        summarizer,
+        keep_recent_conversation_blocks=4,
+        keep_recent_tool_rounds=2,
+    ).reduce(
+        raw_history=history,
+        prepared_messages=prepared,
+        current_messages=current,
+        previous_state=None,
+        initial_estimated_input_tokens=_estimate(prepared),
+        target_tokens=100,
+        estimate=_estimate,
+    )
+
+    assert result.error is None
+    assert result.summary_state is not None
+    assert result.summarized_conversation_blocks == 3
+    assert result.summary_state.covered_message_count == 11
+    assert all(
+        message.tool_call_id not in {"old-1", "old-2"}
+        for message in result.messages
+    )
+    assert all(not message.tool_calls for message in result.messages)
+    assert result.messages[-9:] == (*conversations[-8:], *current)
+
+
+@pytest.mark.asyncio
+async def test_tool_rounds_inside_recent_conversation_region_remain_protected() -> None:
+    older = _history(4)
+    recent_tool = _tool_round("recent")
+    recent_conversation = (
+        Message(role=MessageRole.ASSISTANT, content="工具后的结论"),
+        Message(role=MessageRole.USER, content="继续追问"),
+        Message(role=MessageRole.ASSISTANT, content="继续回答"),
+    )
+    history = (*older, *recent_tool, *recent_conversation)
+    current = (Message(role=MessageRole.USER, content="当前问题"),)
+    prepared = (*history, *current)
+    summarizer = FakeSummarizer()
+
+    result = await ConversationReducer(
+        summarizer,
+        keep_recent_conversation_blocks=2,
+        keep_recent_tool_rounds=1,
+    ).reduce(
+        raw_history=history,
+        prepared_messages=prepared,
+        current_messages=current,
+        previous_state=None,
+        initial_estimated_input_tokens=_estimate(prepared),
+        target_tokens=100,
+        estimate=_estimate,
+    )
+
+    assert result.summary_state is not None
+    assert any(
+        message.tool_calls and message.tool_calls[0].id == "recent"
+        for message in result.messages
+    )
+    assert any(message.tool_call_id == "recent" for message in result.messages)
 
 
 @pytest.mark.asyncio

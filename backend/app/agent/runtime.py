@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from collections.abc import AsyncIterator, Sequence
 from contextlib import suppress
 from typing import Any
@@ -37,6 +38,11 @@ from app.models.types import (
 )
 from app.task.context import TaskContextProvider
 from app.tools.approval import ApprovalGate
+from app.tools.catalog import (
+    TOOL_SEARCH_NAME,
+    activated_tool_names,
+    ensure_tool_search_registered,
+)
 from app.tools.executor import ToolExecutor
 from app.tools.hooks import ToolExecutionContext, ToolHook
 from app.tools.observability import ToolExecutionRecord
@@ -67,6 +73,8 @@ from .result import (
     ToolRound,
 )
 from .tool_hooks import AgentEventHook
+
+_LEGACY_DATE_PATTERN = re.compile(r"当前日期是 \d{4}-\d{2}-\d{2}。")
 
 
 class AgentRuntime:
@@ -262,6 +270,8 @@ class AgentRuntime:
         current_summary_state = summary_state
         memory_context_messages: tuple[Message, ...] = ()
         memory_context_loaded = False
+        activated_tools: set[str] = set()
+        ensure_tool_search_registered(self._tool_registry)
 
         await emitter.emit(
             AgentEventType.AGENT_STARTED,
@@ -298,9 +308,16 @@ class AgentRuntime:
                 self._max_tool_rounds is not None
                 and len(tool_rounds) >= self._max_tool_rounds
             )
-            request_messages = tuple(messages)
+            # 原始历史保持不变；模型请求视图会移除旧版持久提示词中的固定日期。
+            request_messages = tuple(
+                _without_legacy_fixed_date(message) for message in messages
+            )
             request_tools = (
-                () if force_final_answer else self._tool_registry.definitions()
+                ()
+                if force_final_answer
+                else self._tool_registry.model_definitions(
+                    activated_names=activated_tools
+                )
             )
             # 先解析实际使用的模型和输出上限，确保预算与请求完全一致。
             try:
@@ -318,6 +335,7 @@ class AgentRuntime:
                 )
 
             try:
+                # 易变事实通过按需工具获取；这里仅组装确需常驻的临时上下文。
                 ephemeral_messages: list[Message] = []
                 if self._memory_manager is not None and not memory_context_loaded:
                     memory_context_loaded = True
@@ -398,9 +416,33 @@ class AgentRuntime:
                 context_trimmed=context_decision.trimmed,
                 context_window=context_decision.context_window,
                 input_budget=context_decision.input_budget,
+                working_input_budget=context_decision.working_input_budget,
+                hard_trigger_tokens=context_decision.hard_trigger_tokens,
+                hard_target_tokens=context_decision.hard_target_tokens,
                 usage_ratio=context_decision.usage_ratio,
                 trigger_tokens=context_decision.trigger_tokens,
                 target_tokens=context_decision.target_tokens,
+                tool_result_budget_tokens=(
+                    context_decision.tool_result_budget_tokens
+                ),
+                tool_result_tokens_before=(
+                    context_decision.tool_result_tokens_before
+                ),
+                tool_result_tokens_after=(
+                    context_decision.tool_result_tokens_after
+                ),
+                tool_schema_tokens=context_decision.tool_schema_tokens,
+                message_tokens_before=context_decision.message_tokens_before,
+                message_tokens_after=context_decision.message_tokens_after,
+                unsummarized_conversation_blocks=(
+                    context_decision.unsummarized_conversation_blocks
+                ),
+                conversation_block_limit=(
+                    context_decision.conversation_block_limit
+                ),
+                conversation_block_triggered=(
+                    context_decision.conversation_block_triggered
+                ),
                 requires_compaction=context_decision.requires_compaction,
                 exceeds_input_budget=context_decision.exceeds_input_budget,
                 capability_source=context_decision.capability_source,
@@ -472,6 +514,7 @@ class AgentRuntime:
                 )
 
             round_records: list[ToolCallRecord] = []
+            pending_activations: set[str] = set()
             if self._checkpoint_store is not None:
                 await self._checkpoint_store.before_tools(
                     run_id,
@@ -501,17 +544,34 @@ class AgentRuntime:
                         summary_state=current_summary_state,
                     )
 
-                result = await self._execute_tool(
-                    tool_call,
-                    context=ToolExecutionContext(
-                        run_id=run_id,
-                        conversation_id=conversation_id,
-                        user_input=user_input,
-                        step=step,
-                        tool_call=tool_call,
-                    ),
-                    hook=tool_event_hook,
+                execution_context = ToolExecutionContext(
+                    run_id=run_id,
+                    conversation_id=conversation_id,
+                    user_input=user_input,
+                    step=step,
+                    tool_call=tool_call,
                 )
+                if (
+                    self._tool_registry.is_deferred(tool_call.name)
+                    and tool_call.name not in activated_tools
+                ):
+                    await tool_event_hook.before_execute(execution_context)
+                    result = ToolResult(
+                        tool_call_id=tool_call.id,
+                        tool_name=tool_call.name,
+                        success=False,
+                        error=(
+                            "Deferred tool is not active. Call tool_search first."
+                        ),
+                        duration_ms=0,
+                    )
+                    await tool_event_hook.after_execute(execution_context, result)
+                else:
+                    result = await self._execute_tool(
+                        tool_call,
+                        context=execution_context,
+                        hook=tool_event_hook,
+                    )
                 if self._checkpoint_store is not None:
                     await self._checkpoint_store.complete_tool(run_id, result)
                 record = ToolCallRecord(
@@ -522,6 +582,12 @@ class AgentRuntime:
                 round_records.append(record)
                 tool_calls.append(record)
                 messages.append(self._tool_result_message(result))
+                if tool_call.name == TOOL_SEARCH_NAME and result.success:
+                    pending_activations.update(
+                        name
+                        for name in activated_tool_names(result.output)
+                        if self._tool_registry.is_deferred(name)
+                    )
 
             tool_rounds.append(
                 ToolRound(
@@ -530,6 +596,8 @@ class AgentRuntime:
                     records=tuple(round_records),
                 )
             )
+            # 本轮模型没有见过新定义，必须等下一步请求后才能调用。
+            activated_tools.update(pending_activations)
 
         error = MaxStepsExceededError(self._max_steps)
         return self._result(
@@ -1189,6 +1257,17 @@ def _recalled_memory_revisions(
         ):
             recalled[normalized] = revision
     return recalled
+
+
+def _without_legacy_fixed_date(message: Message) -> Message:
+    """仅清理模型请求副本中的旧固定日期，保留数据库原始历史。"""
+
+    if message.role is not MessageRole.SYSTEM or not message.content:
+        return message
+    cleaned = _LEGACY_DATE_PATTERN.sub("", message.content)
+    if cleaned == message.content:
+        return message
+    return message.model_copy(update={"content": cleaned})
 
 
 class _EventEmitter:

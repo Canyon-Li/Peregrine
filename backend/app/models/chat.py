@@ -12,7 +12,6 @@ import argparse
 import asyncio
 import sys
 from collections.abc import Sequence
-from datetime import datetime
 from pathlib import Path
 
 from app.agent.events import AgentEvent, AgentEventType
@@ -60,6 +59,7 @@ from app.tools import (
     PermissionPolicyEngine,
     PermissionRule,
     SQLitePermissionRuleStore,
+    ToolRegistry,
     build_builtin_tool_registry,
     describe_safe_rule,
 )
@@ -391,8 +391,39 @@ def _print_trace(events: tuple[AgentEvent, ...]) -> None:
             details.append(
                 f"success={'true' if event.tool_result.success else 'false'}"
             )
+        if event.type is AgentEventType.MODEL_STARTED:
+            if event.prepared_input_tokens is not None:
+                details.append(f"input≈{event.prepared_input_tokens}")
+            if event.tool_schema_tokens is not None:
+                details.append(f"schemas≈{event.tool_schema_tokens}")
+            if (
+                event.tool_result_tokens_before is not None
+                and event.tool_result_tokens_after is not None
+            ):
+                details.append(
+                    "tool_results≈"
+                    f"{event.tool_result_tokens_before}→"
+                    f"{event.tool_result_tokens_after}"
+                )
+            if event.compaction_stage not in (None, "none"):
+                details.append(f"context={event.compaction_stage}")
         detail_text = f"  {' '.join(details)}" if details else ""
         print(f"{event.sequence:03d}  {event_time}  {event.type.value}{detail_text}")
+
+
+def _mark_deferred_tools(
+    registry: ToolRegistry,
+    names: frozenset[str],
+) -> None:
+    """把不常用工具标记为按需暴露。
+
+    默认只向模型暴露核心工具；被标记的工具不进入请求的 schema，
+    模型需要时通过 ``tool_search`` 搜索并激活后使用。
+    """
+
+    for name in names:
+        tool = registry.unregister(name)
+        registry.register(tool, deferred=True)
 
 
 def _print_permission_rules(rules: tuple[PermissionRule, ...]) -> None:
@@ -519,6 +550,17 @@ async def _run(args: argparse.Namespace) -> int:
     memory_manager = MemoryManager()
     await memory_manager.initialize()
     register_memory_tools(tool_registry, memory_manager)
+    _mark_deferred_tools(
+        tool_registry,
+        frozenset(
+            {
+                "http_request",
+                "memory_list",
+                "core_memory_update",
+                "core_memory_remove",
+            }
+        ),
+    )
     reflection_config = MemoryReflectionConfig()
     memory_reflector = PostRunMemoryReflector(
         registry,
@@ -795,7 +837,6 @@ def _parse_args() -> argparse.Namespace:
         "--system",
         default=(
             "你是 Peregrine，一个本地运行的智能助理。请使用用户的语言回答。"
-            f"当前日期是 {datetime.now().astimezone().date().isoformat()}。"
             "调用工具时优先使用已有结果；网页搜索通常只需一到两次，获得可用结果后"
             "立即整理回答，不要为了追求完美而反复改写相同查询。"
             "当用户明确要求记录任务，或工作复杂、需要多个步骤或跨多轮跟踪时，"
