@@ -14,7 +14,15 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from app.agent.result import AgentStopReason
 from app.task import TaskStatus, TaskStepStatus
 
-VALID_GROUPS = ("basic", "tools", "task", "context", "safety")
+VALID_GROUPS = (
+    "basic",
+    "tools",
+    "task",
+    "context",
+    "safety",
+    "skill",
+    "learning",
+)
 
 
 class InitialMessage(BaseModel):
@@ -46,10 +54,35 @@ class InitialTask(BaseModel):
 
     alias: str | None = None
     title: str
+    description: str | None = None
     goal: str | None = None
     status: TaskStatus = TaskStatus.PENDING
     steps: tuple[InitialStep, ...] = ()
     owner: str | None = None
+    constraints: tuple[str, ...] = ()
+    key_facts: tuple[str, ...] = ()
+    run_ids: tuple[str, ...] = ()
+
+
+class InitialTraceEvent(BaseModel):
+    """预置 Trace 中的一条 AgentEvent（Learning 场景使用）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str
+    tool_name: str | None = None
+    arguments: dict[str, object] = Field(default_factory=dict)
+    success: bool = True
+    error: str | None = None
+
+
+class InitialTraceRun(BaseModel):
+    """预置一条 Agent Run 的完整事件序列。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: str
+    events: tuple[InitialTraceEvent, ...] = ()
 
 
 class InitialFile(BaseModel):
@@ -57,6 +90,44 @@ class InitialFile(BaseModel):
 
     path: str
     content: str = ""
+
+
+class InitialSkill(BaseModel):
+    """预置到评测环境的一个 Skill（目录式：<name>/SKILL.md + 可选 references）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+    body: str = "# 步骤\n\n1. 执行"
+    reference_files: tuple[InitialFile, ...] = ()
+
+    @field_validator("name")
+    @classmethod
+    def valid_name(cls, value: str) -> str:
+        from app.skills import validate_skill_name
+
+        return validate_skill_name(value)
+
+
+class InitialCandidate(BaseModel):
+    """预置到评测环境的一个 Pending SkillCandidate（Learning 场景）。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    proposed_name: str
+    description: str = ""
+    action: str = "create"
+    existing_skill_name: str | None = None
+    source_task_ids: tuple[str, ...] = ()
+    reason: str = "预置待评审候选"
+
+    @field_validator("proposed_name")
+    @classmethod
+    def valid_proposed_name(cls, value: str) -> str:
+        from app.skills import validate_skill_name
+
+        return validate_skill_name(value)
 
 
 class ApprovalPolicy(BaseModel):
@@ -145,11 +216,86 @@ class AnswerExpectation(BaseModel):
     any_of: tuple[str, ...] = ()
 
 
+class SkillExpectation(BaseModel):
+    """Skill 激活期望：应激活 / 不应激活 / 应激活失败。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    activated: tuple[str, ...] = ()
+    not_activated: tuple[str, ...] = ()
+    activation_failed: tuple[str, ...] = ()
+    survives_compaction: bool = False
+
+    @model_validator(mode="after")
+    def no_conflicts(self) -> SkillExpectation:
+        conflicts = (
+            set(self.activated)
+            & (set(self.not_activated) | set(self.activation_failed))
+        )
+        if conflicts:
+            raise ValueError(
+                f"skill cannot be both activated and forbidden/failed: "
+                f"{sorted(conflicts)}"
+            )
+        return self
+
+
+class SkillLearningExpectation(BaseModel):
+    """Skill Learning 期望：候选数量、动作、名字与最终 Skill。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    batch_size: int = Field(default=20, ge=1)
+    candidate_count: int | None = Field(default=None, ge=0)
+    create_count: int | None = Field(default=None, ge=0)
+    update_count: int | None = Field(default=None, ge=0)
+    expected_names: tuple[str, ...] = ()
+    no_candidates: bool = False
+    created_skill_names: tuple[str, ...] = ()
+    # 期望动作（CREATE / UPDATE / NONE）。Action Accuracy 只按此判定，不依赖名字。
+    expected_action: str | None = None
+    # Human Gate 机制测试：预置 Candidate，不跑真实模型产候选。
+    human_gate_only: bool = False
+    # Duplicate 防重场景：期望模型不重复创建（Duplicate Rate 只除这类场景）。
+    expects_no_duplicate: bool = False
+    # 预期属于同一模式簇的 Task alias（用于 Live Eval 计算 Cluster Precision/Recall
+    # 与 Pattern Detection Recall；非空即 positive 场景）。
+    expected_pattern_task_aliases: tuple[str, ...] = ()
+    # 期望被提炼进 pitfalls 的关键词（用于 Pitfall Recall 估算）。
+    expected_pitfall_keywords: tuple[str, ...] = ()
+
+    @field_validator("expected_action")
+    @classmethod
+    def valid_expected_action(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if normalized not in {"create", "update", "none"}:
+            raise ValueError(
+                f"expected_action must be one of create/update/none: {value}"
+            )
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_expectation(self) -> SkillLearningExpectation:
+        if self.no_candidates and self.candidate_count not in (None, 0):
+            raise ValueError(
+                "no_candidates conflicts with a positive candidate_count"
+            )
+        if self.expected_action == "none" and self.candidate_count not in (None, 0):
+            raise ValueError(
+                "expected_action=none conflicts with a positive candidate_count"
+            )
+        return self
+
+
 class Expectation(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     tools: ToolExpectation = Field(default_factory=ToolExpectation)
     task: TaskExpectation = Field(default_factory=TaskExpectation)
+    skill: SkillExpectation = Field(default_factory=SkillExpectation)
+    learning: SkillLearningExpectation = Field(default_factory=SkillLearningExpectation)
     files: tuple[FileExpectation, ...] = ()
     answer: AnswerExpectation = Field(default_factory=AnswerExpectation)
     requires_compaction: bool = False
@@ -171,6 +317,9 @@ class Scenario(BaseModel):
     initial_history: tuple[InitialMessage, ...] = ()
     initial_tasks: tuple[InitialTask, ...] = ()
     initial_files: tuple[InitialFile, ...] = ()
+    initial_skills: tuple[InitialSkill, ...] = ()
+    initial_runs: tuple[InitialTraceRun, ...] = ()
+    initial_pending_candidates: tuple[InitialCandidate, ...] = ()
     allowed_tools: tuple[str, ...] | None = None
     max_steps: int = 10
     max_tool_rounds: int | None = None
@@ -240,6 +389,16 @@ class Scenario(BaseModel):
                 raise ValueError(
                     f"required tools are hidden by allowed_tools: {sorted(hidden)}"
                 )
+
+        learning = self.expect.learning
+        if learning.human_gate_only and not self.initial_pending_candidates:
+            raise ValueError(
+                "human_gate_only learning scenarios must seed pending candidates"
+            )
+        if learning.expects_no_duplicate and not self.initial_pending_candidates:
+            raise ValueError(
+                "expects_no_duplicate learning scenarios must seed pending candidates"
+            )
         return self
 
 
