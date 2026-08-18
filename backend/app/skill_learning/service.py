@@ -34,6 +34,7 @@ from .models import (
     TaskPatternCluster,
 )
 from .store import InflightBatch, SkillCandidateStore
+from .trace_selector import TaskTraceSelector
 
 logger = logging.getLogger("peregrine.skill_learning.service")
 
@@ -115,6 +116,7 @@ class SkillLearningService:
             default_model=default_model,
         )
         self.evidence_builder = TraceEvidenceBuilder(self.settings)
+        self.trace_selector = TaskTraceSelector()
 
     # ------------------------------------------------------------------
     # 主入口
@@ -282,20 +284,20 @@ class SkillLearningService:
                 error=mining.error,
             )
 
-        # 3) 成功：先推进 watermark（无论有无 cluster）。
-        new_processed = tuple(sorted(processed | set(scan_ids)))
-        await self.candidate_store.save_watermark(
-            watermark.model_copy(
-                update={
-                    "processed_task_ids": new_processed,
-                    "pending_task_ids": new_pending,
-                    "inflight": None,
-                    "last_error": None,
-                    "last_mining_at": datetime.now(UTC),
-                }
-            )
-        )
+        # 3) 成功（mining 无 error）。没有 cluster → 直接 processed。
         if not mining.clusters:
+            new_processed = tuple(sorted(processed | set(scan_ids)))
+            await self.candidate_store.save_watermark(
+                watermark.model_copy(
+                    update={
+                        "processed_task_ids": new_processed,
+                        "pending_task_ids": new_pending,
+                        "inflight": None,
+                        "last_error": None,
+                        "last_mining_at": datetime.now(UTC),
+                    }
+                )
+            )
             return SkillLearningOutcome(
                 triggered=True,
                 pending_count=len(new_pending),
@@ -311,7 +313,10 @@ class SkillLearningService:
                 total_duration_ms=pattern_duration,
             )
 
-        # 4) 每个 Cluster：Evidence → Distillation → Candidate（pending）。
+        # 4) 有 clusters：先保持 batch inflight，完成全部 Cluster 的 Evidence →
+        #    Distillation → Candidate 后再标记 processed。某个 Cluster 蒸馏失败时
+        #    保留 inflight 供后续触发点重试（不提前 processed，已创建的 Candidate
+        #    靠 duplicate-source / pending 去重，避免重试重复创建）。
         created: list[SkillCandidate] = []
         errors: list[str] = []
         distillations: list[DistillationRecord] = []
@@ -378,6 +383,100 @@ class SkillLearningService:
 
         total_usage = _add_usage(usage, distill_usage)
         total_duration = pattern_duration + distill_duration
+
+        if errors:
+            # 蒸馏部分失败：不 processed，保留 inflight 供下次触发点重试；
+            # 达到 max_attempts 才放弃（标记 processed，防无限重试）。
+            distill_error = "; ".join(errors)
+            new_attempt = inflight.attempt + 1
+            if new_attempt >= self.settings.skill_learning_max_attempts:
+                new_processed = tuple(sorted(processed | set(scan_ids)))
+                await self.candidate_store.save_watermark(
+                    watermark.model_copy(
+                        update={
+                            "processed_task_ids": new_processed,
+                            "pending_task_ids": new_pending,
+                            "inflight": None,
+                            "last_error": distill_error,
+                            "last_mining_at": datetime.now(UTC),
+                        }
+                    )
+                )
+                return SkillLearningOutcome(
+                    triggered=True,
+                    pending_count=len(new_pending),
+                    scanned_task_count=len(cards),
+                    cluster_count=len(mining.clusters),
+                    clusters=mining.clusters,
+                    candidate_count=len(created),
+                    distillations=tuple(distillations),
+                    usage=total_usage,
+                    pattern_mining_calls=1,
+                    distillation_calls=distill_calls,
+                    input_tokens=total_usage.input_tokens,
+                    output_tokens=total_usage.output_tokens,
+                    total_tokens=total_usage.total_tokens,
+                    pattern_mining_duration_ms=pattern_duration,
+                    distillation_duration_ms=distill_duration,
+                    total_duration_ms=total_duration,
+                    error=(
+                        "distillation failed after "
+                        f"{self.settings.skill_learning_max_attempts} attempts: "
+                        f"{distill_error}"
+                    ),
+                )
+            await self.candidate_store.save_watermark(
+                watermark.model_copy(
+                    update={
+                        "inflight": inflight.model_copy(
+                            update={
+                                "attempt": new_attempt,
+                                "last_error": distill_error,
+                            }
+                        ),
+                        "last_error": distill_error,
+                    }
+                )
+            )
+            logger.warning(
+                "distillation failed (attempt %s/%s): %s",
+                new_attempt,
+                self.settings.skill_learning_max_attempts,
+                distill_error,
+            )
+            return SkillLearningOutcome(
+                triggered=True,
+                pending_count=len(new_pending),
+                scanned_task_count=len(cards),
+                cluster_count=len(mining.clusters),
+                clusters=mining.clusters,
+                candidate_count=len(created),
+                distillations=tuple(distillations),
+                usage=total_usage,
+                pattern_mining_calls=1,
+                distillation_calls=distill_calls,
+                input_tokens=total_usage.input_tokens,
+                output_tokens=total_usage.output_tokens,
+                total_tokens=total_usage.total_tokens,
+                pattern_mining_duration_ms=pattern_duration,
+                distillation_duration_ms=distill_duration,
+                total_duration_ms=total_duration,
+                error=distill_error,
+            )
+
+        # 全部 Cluster 处理成功（含 action=none）→ 标记 processed。
+        new_processed = tuple(sorted(processed | set(scan_ids)))
+        await self.candidate_store.save_watermark(
+            watermark.model_copy(
+                update={
+                    "processed_task_ids": new_processed,
+                    "pending_task_ids": new_pending,
+                    "inflight": None,
+                    "last_error": None,
+                    "last_mining_at": datetime.now(UTC),
+                }
+            )
+        )
         return SkillLearningOutcome(
             triggered=True,
             pending_count=len(new_pending),
@@ -399,18 +498,26 @@ class SkillLearningService:
         )
 
     async def _load_task_events(self, task: Task) -> tuple:
-        """读取 Task.run_ids 关联的 Trace 事件；缺失 / 异常优雅降级为空。"""
+        """读取 Task.run_ids 关联的 Trace，用 task_update 锚点筛选相关事件。
 
-        events: list = []
+        只返回"完成当前 Task 的实际执行过程"（Anchor 之间的 Agent Step 区间），
+        不是整个 Run，也不是只有 task_update 本身。无有效 Anchor 时返回空，
+        由 Evidence Builder 走 Task-only fallback。
+        """
+
+        run_events: dict[str, tuple] = {}
         for run_id in task.run_ids:
             try:
-                loaded = await self.trace_store.load_events(run_id)
+                run_events[run_id] = await self.trace_store.load_events(run_id)
             except (KeyError, ValueError, OSError):
                 continue
-            events.extend(loaded)
-            if len(events) >= self.settings.skill_learning_max_events_per_task:
-                break
-        return tuple(events)
+        if not run_events:
+            return ()
+        return self.trace_selector.select(
+            task,
+            run_events,
+            max_events=self.settings.skill_learning_max_events_per_task,
+        )
 
     # ------------------------------------------------------------------
     # Candidate 查询
@@ -436,9 +543,13 @@ class SkillLearningService:
         *,
         scope: str | None = None,
     ) -> tuple[SkillCandidate, Path | None]:
-        """接受候选：CREATE 生成正式 SKILL.md；UPDATE 生成 replacement proposal。
+        """接受候选（Human Gate 是最终决策点）。
 
-        不会静默覆盖已有 Skill。返回 (更新后的候选, 写入的路径或 None)。
+        - CREATE：创建正式 <scope>/<name>/SKILL.md，成功后 ACCEPTED；
+        - UPDATE：原子覆盖 existing_skill_name 对应的正式 SKILL.md，成功后 ACCEPTED；
+          不再生成"尚未应用的 Proposal"。
+        写入失败时抛明确错误，正式 Skill 与 Candidate 均保持原样（不会出现
+        "文件未更新但 Candidate 已 ACCEPTED"）。
         """
 
         candidate = await self.candidate_store.get(candidate_id)
@@ -453,9 +564,7 @@ class SkillLearningService:
         if candidate.action is SkillCandidateAction.CREATE:
             target = await self._create_skill(candidate, resolved_scope)
         else:
-            existing = await self.skill_store.load(candidate.existing_skill_name or "")
-            markdown = _render_updated_skill(candidate, existing)
-            target = await self.candidate_store.write_proposal(candidate.id, markdown)
+            target = await self._update_skill(candidate)
         updated = candidate.model_copy(
             update={
                 "status": SkillCandidateStatus.ACCEPTED,
@@ -503,6 +612,35 @@ class SkillLearningService:
             raise ValueError(f"skill file already exists: {target}")
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(_render_new_skill(candidate), encoding="utf-8")
+        return target
+
+    async def _update_skill(self, candidate: SkillCandidate) -> Path:
+        """接受 UPDATE：原子覆盖 existing_skill_name 对应的正式 SKILL.md。
+
+        安全性：
+        - existing_skill_name 非空且能 load 到正式 Skill；
+        - 目标路径来自这个 Existing Skill 的真实 SKILL.md（不使用 proposed_name
+          改路径 / 不修改其他 Skill）；
+        - 用 Candidate 的 description/procedure/pitfalls/verification 渲染完整
+          SKILL.md（不追加 Proposal / 审计信息）；
+        - 临时文件 → flush → replace 原子写；写失败抛错，正式 Skill 与 Candidate
+          均保持原样。
+        """
+
+        name = candidate.existing_skill_name
+        if not name:
+            raise ValueError("update candidate requires existing_skill_name")
+        existing = await self.skill_store.load(name)
+        if existing is None:
+            raise ValueError(f"existing skill '{name}' not found; cannot update")
+        # 目标必须是该 Existing Skill 的真实 SKILL.md 路径。
+        target = existing.metadata.location
+        if target.name != "SKILL.md" or target.parent.name != existing.metadata.name:
+            raise ValueError(
+                f"refusing to update unexpected skill path: {target}"
+            )
+        markdown = _render_updated_skill(candidate, existing)
+        _atomic_write_text(target, markdown)
         return target
 
     # ------------------------------------------------------------------
@@ -625,50 +763,59 @@ def _render_new_skill(candidate: SkillCandidate) -> str:
     return "\n".join(lines) + "\n"
 
 
-def _render_updated_skill(
-    candidate: SkillCandidate,
-    existing: Skill | None,
-) -> str:
-    """生成 UPDATE 的 replacement SKILL.md（不直接覆盖正式文件）。"""
+def _render_updated_skill(candidate: SkillCandidate, existing: Skill) -> str:
+    """渲染 UPDATE 后的完整正式 SKILL.md（干净，无提案/审计信息）。
 
-    if existing is not None:
-        base = [
-            "---",
-            f"name: {existing.metadata.name}",
-            f"description: {existing.metadata.description}",
-            "---",
-            "",
-            existing.content.strip(),
-        ]
-        header = "\n".join(base)
-    else:
-        header = f"# {candidate.proposed_name.replace('-', ' ').title()}"
+    - name 固定为 existing_skill_name（UPDATE 的目标唯一由它决定，不因
+      proposed_name 异常而重命名）；
+    - description 使用 candidate.description（模型新描述或继承的旧描述）；
+    - procedure/pitfalls/verification 全部来自 Candidate（V1 不二次 merge）。
+    审计信息（source task / reason / candidate id / review）保留在 Candidate Store，
+    不进入正式 Skill。
+    """
+
+    name = candidate.existing_skill_name or existing.metadata.name
+    title = name.replace("-", " ").title()
     lines = [
-        header,
+        "---",
+        f"name: {name}",
+        f"description: {candidate.description}",
+        "---",
         "",
-        "> 以下为 Skill Learning 生成的 UPDATE 提案，尚未应用到正式 Skill。",
+        f"# {title}",
         "",
-        "## Procedure（提案）",
+        "## Procedure",
         "",
     ]
     for index, step in enumerate(candidate.procedure, 1):
         lines.append(f"{index}. {step}")
     if candidate.pitfalls:
         lines.append("")
-        lines.append("## Pitfalls（提案）")
+        lines.append("## Pitfalls")
         lines.append("")
         lines.extend(f"- {item}" for item in candidate.pitfalls)
     if candidate.verification:
         lines.append("")
-        lines.append("## Verification（提案）")
+        lines.append("## Verification")
         lines.append("")
         lines.extend(f"- {item}" for item in candidate.verification)
-    lines.append("")
-    lines.append(
-        f"来源 Task: {' '.join(candidate.source_task_ids)} · "
-        f"原因: {candidate.reason}"
-    )
     return "\n".join(lines) + "\n"
+
+
+def _atomic_write_text(path: Path, content: str) -> None:
+    """原子写文本文件：临时文件 → flush → replace。
+
+    避免写一半导致正式 Skill 损坏；失败时原文件保持原样。
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_name(
+        f".{path.name}.tmp.{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}"
+    )
+    with temp.open("w", encoding="utf-8") as handle:
+        handle.write(content)
+        handle.flush()
+    temp.replace(path)
 
 
 __all__ = ["SkillLearningOutcome", "SkillLearningService"]
