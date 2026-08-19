@@ -21,6 +21,11 @@ from app.agent.events import (
     CompositeEventHandler,
 )
 from app.agent.runtime import AgentRuntime
+from app.automation import (
+    AutomationScheduler,
+    SQLiteAutomationStore,
+    register_automation_tools,
+)
 from app.checkpoint import RunCheckpoint, SQLiteCheckpointStore
 from app.context import (
     ContextManager,
@@ -32,8 +37,11 @@ from app.context import (
 from app.conversation import (
     DEFAULT_DATABASE_PATH,
     Conversation,
+    ConversationSource,
     SQLiteConversationStore,
+    TriggerContext,
 )
+from app.conversation.service import ConversationService
 from app.mcp import (
     DEFAULT_MCP_CONFIG_PATH,
     MCPClientManager,
@@ -97,6 +105,8 @@ _COMMAND_OVERVIEW = (
     "/memories 查看长期记忆，/memory <id> 查看记忆详情，"
     "/runs 查看运行（生命周期），/run <id> 查看详情，/run cancel <id> 取消，"
     "/run recover <id> 恢复，/checkpoints 查看恢复点，/trace <id> 查看轨迹，"
+    "/automations 查看自动化，/automation <id> 查看详情，"
+    "/automation cancel|pause|resume <id> 管理自动化，"
     "/mcp 查看 MCP Server 与工具，"
     "/permissions 查看审批规则，"
     "/skill-candidates 查看 Skill Learning 候选，"
@@ -115,6 +125,11 @@ _HELP_TEXT = (
     "/run cancel <Run ID> 取消正在执行的 Run\n"
     "/run recover <Run ID> 恢复中断的 Run\n"
     "/checkpoints 查看当前会话的运行恢复点\n"
+    "/automations 查看当前会话的自动化\n"
+    "/automation <ID> 查看自动化详情\n"
+    "/automation cancel <ID> 取消自动化\n"
+    "/automation pause <ID> 暂停自动化\n"
+    "/automation resume <ID> 恢复自动化\n"
     "/trace <Run ID> 查看完整事件轨迹\n"
     "/permissions 查看当前会话的审批规则\n"
     "/permission remove <规则ID> 删除一条审批规则\n"
@@ -170,52 +185,32 @@ class _CliEventHandler(AgentEventHandler):
 
 async def _send_message(
     *,
-    run_manager: RunManager,
+    conversation_service: ConversationService,
     conversation_store: SQLiteConversationStore,
-    trace_handler: SQLiteTraceEventHandler,
     conversation: Conversation,
     provider: ModelProvider,
     history: list[Message],
     content: str,
     model: str,
-    summary_store: SQLiteConversationSummaryStore | None = None,
 ) -> tuple[bool, Conversation]:
     print("Peregrine 正在思考...", flush=True)
 
-    summary_state = (
-        await summary_store.load(conversation.id) if summary_store is not None else None
-    )
-    run_id, _task = await run_manager.start(
-        content,
-        conversation_id=conversation.id,
-        history=history,
-        summary_state=summary_state,
-        event_handler=CompositeEventHandler(trace_handler, _CliEventHandler()),
-    )
     try:
-        run = await run_manager.wait(run_id)
+        dispatch = await conversation_service.dispatch(
+            conversation_id=conversation.id,
+            content=content,
+            trigger=TriggerContext(source=ConversationSource.MANUAL),
+            event_handler=_CliEventHandler(),
+        )
     except KeyboardInterrupt:
-        # 用户 Ctrl+C：不退出 peregrine，尽量 cancel 当前 Run 后回到输入循环。
-        print("\n[cancel] 正在取消当前 Run...", flush=True)
-        try:
-            cancelled = await run_manager.cancel(run_id)
-            print(f"Run 已取消：{cancelled.id[:8]} · {cancelled.status.value}")
-        except ValueError:
-            # Run 恰好已在取消/完成之间结束，无需处理。
-            print(f"Run {run_id[:8]} 已结束，无需取消。")
+        # 用户 Ctrl+C：ConversationService 已尽力 cancel 当前 Run，
+        # 回到输入循环，不退出 peregrine。
+        print("\n[cancel] 已取消当前 Run。")
         return False, conversation
-    result = run_manager.result(run_id)
-    if result is None:
-        raise RuntimeError("RunManager 未返回最终 AgentResult")
 
-    # 会话存储保存完整原始历史；模型请求压缩由 ContextManager 单独负责。
+    result = dispatch.result
+    # 会话存储已由 ConversationService 写回；同步内存 history 供 /use 等使用。
     history[:] = result.messages
-    conversation = await conversation_store.replace_messages(
-        conversation.id,
-        history,
-    )
-    if summary_store is not None and result.summary_state is not None:
-        await summary_store.save(conversation.id, result.summary_state)
     if conversation.title == "新会话":
         conversation = await conversation_store.rename(
             conversation.id,
@@ -223,7 +218,7 @@ async def _send_message(
         )
     answer = result.content or "<模型未返回文本>"
     print(f"\nPeregrine> {answer.strip()}")
-    stop_reason = run.stop_reason or result.stop_reason.value
+    stop_reason = dispatch.run.stop_reason or result.stop_reason.value
     print(
         f"\n[{provider.value}/{model} · {result.steps} steps · "
         f"{result.usage.total_tokens} tokens · {stop_reason}]"
@@ -234,7 +229,7 @@ async def _send_message(
             for record in result.tool_calls
         )
         print(f"[工具调用：{tools}]")
-    if run.status.value == "cancelled":
+    if dispatch.run.status.value == "cancelled":
         print("[Run 已被取消]")
     return result.ok, conversation
 
@@ -417,6 +412,53 @@ def _print_run_detail(run: Run) -> None:
     if run.recovered_from_run_id:
         print(f"  recovered_from: {run.recovered_from_run_id[:8]}")
     print(f"  user_message: {(run.user_message or '')[:120]}")
+
+
+def _print_automations(automations: tuple[object, ...]) -> None:
+    """显示自动化列表。"""
+
+    if not automations:
+        print("暂无 Automation。")
+        return
+    for item in automations:
+        next_run = (
+            item.next_run_at.astimezone().strftime("%m-%d %H:%M")
+            if item.next_run_at is not None
+            else "-"
+        )
+        print(
+            f"{item.id[:8]}  {item.title[:24]:<24}  "
+            f"{item.status.value:<9} next={next_run}"
+        )
+
+
+def _print_automation(automation: object) -> None:
+    """显示单个自动化详情。"""
+
+    if automation is None:
+        print("找不到 Automation。")
+        return
+    schedule = automation.schedule
+    print(f"Automation {automation.id}")
+    print(f"  title: {automation.title}")
+    print(f"  status: {automation.status.value}")
+    print(f"  kind: {schedule.kind.value}")
+    if schedule.kind.value == "once":
+        print(f"  run_at: {schedule.run_at}")
+    elif schedule.kind.value == "interval":
+        print(f"  interval_seconds: {schedule.interval_seconds}")
+    else:
+        print(f"  cron_expr: {schedule.cron_expr}")
+    print(f"  timezone: {schedule.timezone}")
+    print(f"  conversation_id: {automation.conversation_id or '-'}")
+    next_run = (
+        automation.next_run_at.astimezone().strftime("%m-%d %H:%M:%S")
+        if automation.next_run_at is not None
+        else "-"
+    )
+    print(f"  next_run_at: {next_run}")
+    print(f"  last_run_id: {automation.last_run_id or '-'}")
+    print(f"  prompt: {(automation.prompt or '')[:160]}")
 
 
 def _print_checkpoints(checkpoints: tuple[RunCheckpoint, ...]) -> None:
@@ -814,18 +856,33 @@ async def _run(args: argparse.Namespace) -> int:
     recovered = await run_manager.initialize()
     if recovered:
         _print_recovered_runs(recovered)
+
+    # ConversationService：CLI 与 Automation 共用的统一执行链。
+    conversation_service = ConversationService(
+        conversation_store,
+        run_manager,
+        trace_store,
+        summary_store=summary_store,
+    )
+
+    # Automation / Scheduler：到时间向 Conversation 投递一条输入。
+    automation_store = SQLiteAutomationStore(args.database)
+    automation_scheduler = AutomationScheduler(
+        automation_store,
+        conversation_service,
+    )
+    register_automation_tools(tool_registry, automation_scheduler)
+    await automation_scheduler.start()
     try:
         if args.message is not None:
             success, conversation = await _send_message(
-                run_manager=run_manager,
+                conversation_service=conversation_service,
                 conversation_store=conversation_store,
-                trace_handler=trace_handler,
                 conversation=conversation,
                 provider=provider,
                 history=history,
                 content=args.message,
                 model=model,
-                summary_store=summary_store,
             )
             await _maybe_run_skill_learning(skill_learning)
             return 0 if success else 1
@@ -833,7 +890,9 @@ async def _run(args: argparse.Namespace) -> int:
         print(_COMMAND_OVERVIEW)
         while True:
             try:
-                content = input("\n你> ").strip()
+                # 用 to_thread 避免同步 input() 阻塞 asyncio 事件循环，
+                # 确保用户停在输入框时 Scheduler 仍能按时触发 Automation。
+                content = (await asyncio.to_thread(input, "\n你> ")).strip()
             except EOFError, KeyboardInterrupt:
                 print("\n聊天已结束。")
                 return 0
@@ -1001,6 +1060,65 @@ async def _run(args: argparse.Namespace) -> int:
                 )
                 _print_trace(await trace_store.load_events(run.run_id))
                 continue
+            if content == "/automations":
+                _print_automations(
+                    await automation_scheduler.list(
+                        conversation_id=conversation.id,
+                    )
+                )
+                continue
+            if content == "/automation" or content.startswith("/automation "):
+                parts = content.split()
+                if len(parts) < 2:
+                    _print_automations(
+                        await automation_scheduler.list(
+                            conversation_id=conversation.id,
+                        )
+                    )
+                    continue
+                action_word = parts[1].lower()
+                if action_word in ("cancel", "pause", "resume"):
+                    if len(parts) < 3:
+                        print(f"用法：/automation {action_word} <ID>")
+                        continue
+                    identifier = parts[2]
+                    try:
+                        automation = await automation_scheduler.resolve(
+                            identifier
+                        )
+                    except ValueError as exc:
+                        print(exc)
+                        continue
+                    if automation is None:
+                        print(f"找不到 Automation：{identifier}")
+                        continue
+                    try:
+                        if action_word == "cancel":
+                            updated = await automation_scheduler.cancel(
+                                automation.id
+                            )
+                        elif action_word == "pause":
+                            updated = await automation_scheduler.pause(
+                                automation.id
+                            )
+                        else:
+                            updated = await automation_scheduler.resume(
+                                automation.id
+                            )
+                    except ValueError as exc:
+                        print(exc)
+                        continue
+                    print(
+                        f"Automation {updated.id[:8]} "
+                        f"{action_word} → {updated.status.value}"
+                    )
+                    continue
+                automation = await automation_scheduler.get(parts[1])
+                if automation is None:
+                    print(f"找不到 Automation：{parts[1]}")
+                    continue
+                _print_automation(automation)
+                continue
             if content == "/use" or content.startswith("/use "):
                 identifier = content.removeprefix("/use").strip()
                 if not identifier:
@@ -1098,18 +1216,17 @@ async def _run(args: argparse.Namespace) -> int:
                 continue
 
             _, conversation = await _send_message(
-                run_manager=run_manager,
+                conversation_service=conversation_service,
                 conversation_store=conversation_store,
-                trace_handler=trace_handler,
                 conversation=conversation,
                 provider=provider,
                 history=history,
                 content=content,
                 model=model,
-                summary_store=summary_store,
             )
             await _maybe_run_skill_learning(skill_learning)
     finally:
+        await automation_scheduler.shutdown()
         await mcp_manager.close(tool_registry)
         await registry.close()
 
