@@ -21,3 +21,7 @@ backend/.peregrine/
 
 # Local evaluation artifacts
 backend/tests/eval/reports/*.md
+
+# Web (Vite)
+web/node_modules/
+web/dist/

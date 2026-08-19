@@ -1,0 +1,31 @@
+{
+  "name": "peregrine-web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Peregrine Web V0 — Web + React + TypeScript + Vite",
+  "main": "dist-web/web/main.js",
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.web.json",
+    "build": "npm run typecheck && vite build && tsc -p tsconfig.web.json",
+    "web": "tsc -p tsconfig.web.json && web .",
+    "web:dev": "concurrently -k \"vite\" \"tsc -w -p tsconfig.web.json\" \"wait-on tcp:127.0.0.1:5173 && web .\""
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5.59.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "zustand": "^5.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "@types/react": "^18.3.10",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.2",
+    "concurrently": "^9.0.1",
+    "web": "^33.0.0",
+    "typescript": "^5.6.2",
+    "vite": "^5.4.8",
+    "wait-on": "^8.0.1"
+  }
+}
