@@ -162,14 +162,22 @@ class AgentRuntime:
         conversation_id: str | None = None,
         event_handler: AgentEventHandler | None = None,
         summary_state: ConversationSummaryState | None = None,
+        run_id: str | None = None,
+        recovery_run_id: str | None = None,
     ) -> AgentResult:
         """处理一次用户输入并返回完整的运行结果（AgentResult）。
 
         模型和工具运行时错误不会向外抛出，而是以结构化的
         ``AgentResult.error`` 与停止原因返回。
+
+        ``run_id`` 可选：由调用方指定 Run ID（RunManager 用它把 Run 与
+        Checkpoint / Trace 关联），缺省时内部生成。
+        ``recovery_run_id`` 可选：显式指定要恢复的旧中断 Checkpoint（对应旧 Run）。
+        只有显式传入 ``recovery_run_id`` 时本 Run 才会加载恢复证据；普通调用
+        永远不隐式自动恢复 —— 恢复哪个 Run 的决定权属于 RunManager.recover()。
         """
 
-        run_id = uuid4().hex
+        run_id = run_id or uuid4().hex
         emitter = _EventEmitter(
             handler=event_handler or NullEventHandler(),
             run_id=run_id,
@@ -178,10 +186,10 @@ class AgentRuntime:
         try:
             recovery_checkpoint: RunCheckpoint | None = None
             if self._checkpoint_store is not None:
-                if conversation_id is not None:
+                if recovery_run_id is not None:
                     recovery_checkpoint = (
-                        await self._checkpoint_store.latest_unrecovered(
-                            conversation_id
+                        await self._checkpoint_store.get_unrecovered(
+                            recovery_run_id
                         )
                     )
                 await self._checkpoint_store.start(
@@ -1170,6 +1178,8 @@ class AgentRuntime:
         conversation_id: str | None = None,
         event_handler: AgentEventHandler | None = None,
         summary_state: ConversationSummaryState | None = None,
+        run_id: str | None = None,
+        recovery_run_id: str | None = None,
     ) -> AsyncIterator[AgentEvent]:
         """以事件流方式执行任务，内部复用同一个 ``run()`` 循环。"""
 
@@ -1186,6 +1196,8 @@ class AgentRuntime:
                     conversation_id=conversation_id,
                     event_handler=handler,
                     summary_state=summary_state,
+                    run_id=run_id,
+                    recovery_run_id=recovery_run_id,
                 )
             finally:
                 await queue_handler.finish()
