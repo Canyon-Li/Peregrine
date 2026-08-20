@@ -34,6 +34,7 @@ from app.automation import (
     register_automation_tools,
 )
 from app.checkpoint import SQLiteCheckpointStore
+from app.agent import AgentRuntime, register_agent_tools
 from app.context import (
     ContextManager,
     ContextSettings,
@@ -64,7 +65,7 @@ from app.memory import (
 from app.models.config import ModelSettings
 from app.models.registry import ModelAdapterRegistry
 from app.models.types import ModelProvider
-from app.run import RunManager, SQLiteRunStore
+from app.run import RunManager, RunStatus, SQLiteRunStore
 from app.skill_learning import (
     SkillCandidateStore,
     SkillLearningService,
@@ -190,6 +191,7 @@ class Application:
         memory_maintenance_config: MemoryMaintenanceConfig | None = None,
         skill_learning_settings: SkillLearningSettings | None = None,
         web_approval: bool = False,
+        agent_runtime: AgentRuntime | None = None,
     ) -> None:
         self.database = Path(database).expanduser().resolve()
         self.tasks_dir = Path(tasks_dir).expanduser().resolve()
@@ -216,6 +218,8 @@ class Application:
         self._skill_learning_settings = skill_learning_settings
         # True = WebApprovalGate（Server）；False = ConsoleApprovalGate（CLI）。
         self.web_approval = web_approval
+        # Agent Runtime：V0 只注入 Fake；None 时不注册 agent_* 工具。
+        self._agent_runtime = agent_runtime
 
         self.settings = settings or ModelSettings()
         if registry is not None:
@@ -248,6 +252,7 @@ class Application:
         self.approval_store: SQLiteApprovalStore | None = None
         self.approval_gate: Any | None = None
         self.web_approval_gate: WebApprovalGate | None = None
+        self.agent_runtime: AgentRuntime | None = None
         self.tool_registry: ToolRegistry | None = None
         self.task_store: FileTaskStore | None = None
         self.memory_manager: MemoryManager | None = None
@@ -346,6 +351,12 @@ class Application:
             default_model=self.model,
         )
 
+        # Agent Runtime：V0 只接入 FakeAgentRuntime；未注入则不注册，
+        # 普通 CLI / Server 现有功能完全不受影响。
+        if self._agent_runtime is not None:
+            register_agent_tools(tool_registry, self._agent_runtime)
+            self.agent_runtime = self._agent_runtime
+
         _mark_deferred_tools(tool_registry, _DEFERRED_TOOL_NAMES)
 
         reflection_config = self._memory_reflection_config or MemoryReflectionConfig()
@@ -422,9 +433,22 @@ class Application:
             run_store,
             checkpoint_store,
             runtime,
+            approval_store=approval_store,
         )
         # 启动 reconciliation（Run + Checkpoint 统一处理）。
         reconciled_runs = await run_manager.initialize()
+        # 孤儿审批：Host 启动后，没有对应活跃 Run（非终态）的 PENDING approval
+        # 统一置为 CANCELLED（无人等待，也不应再显示为 pending）。
+        active_run_ids = {
+            run.id
+            for run in (
+                await run_store.list_runs(status=RunStatus.PENDING)
+            )
+            + (
+                await run_store.list_runs(status=RunStatus.RUNNING)
+            )
+        }
+        await approval_store.reconcile_orphans(active_run_ids)
 
         conversation_service = ConversationService(
             conversation_store,

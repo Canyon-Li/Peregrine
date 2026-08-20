@@ -217,4 +217,63 @@ describe('RpcClient', () => {
     await vi.advanceTimersByTimeAsync(150)
     await assertion
   })
+
+  it('per-call timeoutMs 覆盖客户端默认值', async () => {
+    const { client, fakes } = makeClient() // 客户端默认 60s
+    client.connect()
+    fakes[0].open()
+    const promise = client.call('run.list', undefined, { timeoutMs: 100 })
+    const assertion = expect(promise).rejects.toMatchObject({
+      code: RpcErrorCode.RequestTimeout,
+    })
+    await vi.advanceTimersByTimeAsync(150)
+    await assertion
+  })
+
+  it('timeoutMs: 0 = 不设客户端超时（断线仍 reject）', async () => {
+    const { client, fakes } = makeClient(100) // 客户端默认 100ms
+    client.connect()
+    fakes[0].open()
+    const promise = client.call('run.list', undefined, { timeoutMs: 0 })
+    // 远超默认超时仍不应被 reject。
+    await vi.advanceTimersByTimeAsync(5000)
+    const sent = fakes[0].sent[0]
+    expect(sent).toBeDefined()
+    expect(sent?.id).toBeDefined()
+    // 响应到达 → 正常 resolve（conversation.send 长时间运行场景）。
+    fakes[0].message(response(sent?.id as number, { ok: true }))
+    await expect(promise).resolves.toMatchObject({ ok: true })
+  })
+
+  it('no-timeout 请求断线时仍 reject pending', async () => {
+    const { client, fakes } = makeClient()
+    client.connect()
+    fakes[0].open()
+    const promise = client.call('run.list', undefined, { timeoutMs: 0 })
+    const assertion = expect(promise).rejects.toMatchObject({
+      code: RpcErrorCode.NotConnected,
+    })
+    fakes[0].close()
+    await assertion
+  })
+
+  it('disconnect 后再次 connect 能重新建立连接（StrictMode 双挂载）', async () => {
+    // 回归：React StrictMode 开发模式会 mount→unmount→mount，disconnect() 后
+    // 再次 connect() 必须能发起新连接（旧连接尝试不得卡住 connectPromise）。
+    const { client, fakes } = makeClient()
+    client.connect()
+    fakes[0].open()
+    // StrictMode: cleanup → disconnect
+    client.disconnect()
+    // 再次 mount → connect
+    client.connect()
+    const second = fakes[1]
+    expect(second).toBeDefined()
+    second.open()
+    const promise = client.call('run.list')
+    const sent = second.sent[0]
+    expect(sent?.id).toBeDefined()
+    second.message(response(sent?.id as number, { ok: true }))
+    await expect(promise).resolves.toMatchObject({ ok: true })
+  })
 })
