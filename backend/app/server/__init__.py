@@ -1,4 +1,4 @@
-"""Peregrine Agent Server：本地 Host transport（FastAPI + JSON-RPC WebSocket）。"""
+"""peregrine Host：本地 FastAPI + JSON-RPC WebSocket transport。"""
 
 from .app import create_app
 from .rpc import (
@@ -27,4 +27,3 @@ __all__ = [
     "parse_message",
     "__version__",
 ]
-

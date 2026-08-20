@@ -1,6 +1,6 @@
 """Application：peregrine 的 composition root（统一依赖装配）。
 
-CLI（``app.models.chat``）与 Agent Server（``app.server``）共用这一份
+CLI（``app.models.chat``）与 peregrine Host（``app.server``）共用这一份
 “初始化并持有全部运行依赖”的逻辑，避免各自复制一套 wiring。
 
 生命周期：
@@ -236,9 +236,9 @@ class Application:
         self._memory_reflection_config = memory_reflection_config
         self._memory_maintenance_config = memory_maintenance_config
         self._skill_learning_settings = skill_learning_settings
-        # True = WebApprovalGate（Server）；False = ConsoleApprovalGate（CLI）。
+        # True = WebApprovalGate（Host）；False = ConsoleApprovalGate（CLI）。
         self.web_approval = web_approval
-        # Agent Runtime：V0 只注入 Fake；None 时不注册 agent_* 工具。
+        # Agent Runtime 由入口注入；None 时不注册 agent_* 工具。
         self._agent_runtime = agent_runtime
         # Agent Host 状态（bootstrap 产物；None = 未配置 Agent）。
         self.agent_host_status = agent_host_status
@@ -385,8 +385,8 @@ class Application:
             default_model=self.model,
         )
 
-        # Agent Runtime：V0 只接入 FakeAgentRuntime；未注入则不注册，
-        # 普通 CLI / Server 现有功能完全不受影响。
+        # Agent Runtime 可注入真实实现或测试 Fake；未注入则不注册，
+        # 普通 CLI / Host 现有功能完全不受影响。
         agent_lease: AgentLeaseManager | None = None
         agent_hooks = ()
         if self._agent_runtime is not None:

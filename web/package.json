@@ -2,7 +2,7 @@
   "name": "peregrine-web",
   "version": "0.1.0",
   "private": true,
-  "description": "Peregrine Web V0 — Web + React + TypeScript + Vite",
+  "description": "peregrine Web — Web + React + TypeScript + Vite",
   "main": "dist-web/web/main.js",
   "scripts": {
     "dev": "vite",
