@@ -18,6 +18,9 @@ workspace/*
 !workspace/.gitkeep
 .peregrine/
 backend/.peregrine/
+# 旧数据目录（迁移前仍忽略，避免误提交用户已有数据）
+.peregrine/
+backend/.peregrine/
 
 # Local evaluation artifacts
 backend/tests/eval/reports/*.md

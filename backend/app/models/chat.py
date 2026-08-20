@@ -139,7 +139,7 @@ async def _send_message(
         )
     except KeyboardInterrupt:
         # 用户 Ctrl+C：ConversationService 已尽力 cancel 当前 Run，
-        # 回到输入循环，不退出 peregrine。
+        # 回到输入循环，不退出 Peregrine。
         print("\n[cancel] 已取消当前 Run。")
         return False, conversation
 

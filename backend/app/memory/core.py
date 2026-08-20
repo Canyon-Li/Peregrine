@@ -24,7 +24,7 @@ from app.context.tokens import default_token_estimator
 logger = logging.getLogger("peregrine.memory.core")
 
 DEFAULT_MAX_CORE_TOKENS = 2_000
-_CORE_FORMAT = "agent-core-v1"
+_CORE_FORMAT = "peregrine-core-v1"
 _CORE_HEADING = "# Core Memory"
 _MANAGED_HEADING = "## Managed Core Entries"
 _CORE_KEY_RE = re.compile(r"^[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)*$")

@@ -1,4 +1,4 @@
-/** peregrine Web 的统一 lucide 图标入口。 */
+/** Peregrine Web 的统一 lucide 图标入口。 */
 
 import {
   Activity,

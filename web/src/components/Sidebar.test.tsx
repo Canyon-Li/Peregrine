@@ -21,7 +21,7 @@ describe('Sidebar (App Shell)', () => {
     ]) {
       expect(html).toContain(label)
     }
-    expect(html).toContain('peregrine')
+    expect(html).toContain('Peregrine')
   })
 
   it('当前页有 active 状态', () => {

@@ -1,4 +1,4 @@
-/** 与 peregrine Host JSON-RPC 对应的 Web 类型。 */
+/** 与 Peregrine Host JSON-RPC 对应的 Web 类型。 */
 
 export interface Conversation {
   id: string

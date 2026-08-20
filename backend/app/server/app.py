@@ -1,4 +1,4 @@
-"""peregrine Host 的本地 transport。
+"""Peregrine Host 的本地 transport。
 
 FastAPI 不是业务架构，只负责：
 
@@ -129,7 +129,7 @@ async def artifact_content(artifact_id: str, request: Request) -> FileResponse:
 
 
 def create_app(application: Application | None = None) -> FastAPI:
-    """构造 peregrine Host 应用。
+    """构造 Peregrine Host 应用。
 
     ``application`` 为 None 时自动用默认配置创建（provider 从 .env 选择）。
     调用方也可传入已配置的 Application（例如测试注入离线 fake registry）。
@@ -162,7 +162,7 @@ def create_app(application: Application | None = None) -> FastAPI:
         if artifact_service is not None:
             artifact_service.set_broadcaster(hub.broadcast)
         logger.info(
-            "peregrine Host started · provider=%s · model=%s",
+            "Peregrine Host started · provider=%s · model=%s",
             application.provider,
             application.model,
         )
@@ -170,10 +170,10 @@ def create_app(application: Application | None = None) -> FastAPI:
             yield
         finally:
             await application.close()
-            logger.info("peregrine Host stopped")
+            logger.info("Peregrine Host stopped")
 
     app = FastAPI(
-        title="peregrine Host",
+        title="Peregrine Host",
         version=__version__,
         lifespan=lifespan,
     )

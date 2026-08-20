@@ -290,7 +290,7 @@ async def test_openai_chat_stream_rebuilds_text_and_tool_calls() -> None:
                                     id="call-1",
                                     function=SimpleNamespace(
                                         name="search",
-                                        arguments='{"query":"peregrine"}',
+                                        arguments='{"query":"Peregrine"}',
                                     ),
                                 )
                             ],
@@ -323,7 +323,7 @@ async def test_openai_chat_stream_rebuilds_text_and_tool_calls() -> None:
 
     assert deltas == ["先"]
     assert response.message.content == "先"
-    assert response.message.tool_calls[0].arguments == {"query": "peregrine"}
+    assert response.message.tool_calls[0].arguments == {"query": "Peregrine"}
     assert response.message.reasoning == "思考中"
     assert response.usage.total_tokens == 8
 

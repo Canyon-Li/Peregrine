@@ -21,13 +21,13 @@ export default function LiveAgentTurn({
     <section
       className={`live-turn${settling ? ' live-turn--settling' : ''}`}
       aria-live="polite"
-      aria-label="peregrine 实时执行过程"
+      aria-label="Peregrine 实时执行过程"
     >
       {/* 与最终 assistant 消息共用的作者行，仅多一个 live 指示点：
           回复完成、容器被正式消息替换时，视觉不会跳变。 */}
       <div className="message-assistant__author">
         <span className="message-assistant__avatar"><Icon name="agent" size={13} /></span>
-        peregrine
+        Peregrine
         <span className="live-turn__pulse" aria-hidden="true" />
       </div>
       {events.length > 0 ? (

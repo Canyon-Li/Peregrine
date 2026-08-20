@@ -1,6 +1,6 @@
-"""Application：peregrine 的 composition root（统一依赖装配）。
+"""Application：Peregrine 的 composition root（统一依赖装配）。
 
-CLI（``app.models.chat``）与 peregrine Host（``app.server``）共用这一份
+CLI（``app.models.chat``）与 Peregrine Host（``app.server``）共用这一份
 “初始化并持有全部运行依赖”的逻辑，避免各自复制一套 wiring。
 
 生命周期：
@@ -184,7 +184,7 @@ def _mark_deferred_tools(
 
 
 class Application:
-    """统一创建并持有 peregrine 的全部运行依赖。"""
+    """统一创建并持有 Peregrine 的全部运行依赖。"""
 
     def __init__(
         self,

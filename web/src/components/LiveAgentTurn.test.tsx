@@ -30,7 +30,7 @@ function event(partial: Partial<AgentEvent>): AgentEvent {
 describe('LiveAgentTurn', () => {
   it('无事件时立即显示启动状态', () => {
     const html = renderToStaticMarkup(<LiveAgentTurn events={[]} streamText="" />)
-    expect(html).toContain('peregrine')
+    expect(html).toContain('Peregrine')
     expect(html).toContain('live-turn__pulse')
     expect(html).toContain('Starting the run')
   })

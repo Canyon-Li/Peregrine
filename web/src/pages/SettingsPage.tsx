@@ -39,12 +39,12 @@ export default function SettingsPage(): React.JSX.Element {
       <h2 style={{ margin: 0, fontSize: 16, marginBottom: 12 }}>Settings</h2>
 
       <div className="panel" style={{ padding: 14 }}>
-        <h3 style={{ fontSize: 14, marginTop: 0 }}>peregrine Host</h3>
+        <h3 style={{ fontSize: 14, marginTop: 0 }}>Peregrine Host</h3>
         {infoQuery.isLoading ? (
           <div className="text-dim"><span className="spinner" /> 正在检查后端…</div>
         ) : infoQuery.isError ? (
           <div className="error-text">
-            无法连接 peregrine Host。请先在 backend 启动：
+            无法连接 Peregrine Host。请先在 backend 启动：
             <pre style={{ background: 'var(--bg)', padding: 10, borderRadius: 6 }}>{'python -m app.server'}</pre>
           </div>
         ) : (
