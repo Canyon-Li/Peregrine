@@ -24,6 +24,9 @@ export const RpcMethods = {
   taskGet: 'task.get',
   taskPlanAccept: 'task.plan_accept',
   taskPlanReject: 'task.plan_reject',
+  agentStatus: 'agent.status',
+  agentRequestPermission: 'agent.request_permission',
+  agentLatestObservation: 'agent.latest_observation',
 } as const
 
 export type RpcMethodName = (typeof RpcMethods)[keyof typeof RpcMethods]

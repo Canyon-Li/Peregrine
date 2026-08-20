@@ -6,6 +6,7 @@ from ..dispatcher import RpcDispatcher
 from . import (
     approvals,
     automations,
+    agent,
     conversations,
     runs,
     system,
@@ -25,6 +26,7 @@ def build_dispatcher() -> RpcDispatcher:
     automations.register(dispatcher)
     approvals.register(dispatcher)
     tasks.register(dispatcher)
+    agent.register(dispatcher)
     return dispatcher
 
 

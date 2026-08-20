@@ -1,7 +1,10 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
+import { SERVER_URL } from '../api/config'
+import { getLatestAgentObservation } from '../api/agent'
 import { cancelRun, getRun, getRunTrace, recoverRun } from '../api/runs'
+import AgentObservationPanel from '../components/AgentObservationPanel'
 import RunBadge from '../components/RunBadge'
 import TraceTimeline from '../components/TraceTimeline'
 
@@ -34,9 +37,16 @@ export default function RunDetailPage({
     queryFn: () => getRunTrace(runId),
     refetchInterval: 3000,
   })
+  const agentObservationQuery = useQuery({
+    queryKey: ['agent-observation', runId],
+    queryFn: () => getLatestAgentObservation(runId),
+    refetchInterval: 3000,
+    retry: false,
+  })
 
   const run = runQuery.data
   const events = traceQuery.data?.events ?? []
+  const agentObservation = agentObservationQuery.data
 
   const doCancel = async (): Promise<void> => {
     setNotice(null)
@@ -112,6 +122,18 @@ export default function RunDetailPage({
       <div className="panel" style={{ padding: 12 }}>
         <TraceTimeline events={events} />
       </div>
+
+      {agentObservation?.observation ? (
+        <div className="panel" style={{ padding: 12, marginTop: 14 }}>
+          <AgentObservationPanel
+            observation={agentObservation.observation}
+            runId={agentObservation.run_id}
+            eventTime={agentObservation.event_time}
+            serverUrl={SERVER_URL}
+            title="Agent Observation"
+          />
+        </div>
+      ) : null}
     </div>
   )
 }

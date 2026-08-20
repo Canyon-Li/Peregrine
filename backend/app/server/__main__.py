@@ -23,6 +23,15 @@ def main() -> int:
         "--mcp-config",
         help="Path to the MCP Server JSON configuration file.",
     )
+    parser.add_argument(
+        "--agent-helper",
+        help="Explicit Swift helper binary path (overrides env/dev auto-detect).",
+    )
+    parser.add_argument(
+        "--disable-agent",
+        action="store_true",
+        help="Disable Agent Runtime even if a helper is available.",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -40,6 +49,16 @@ def main() -> int:
         application_kwargs["database"] = args.database
     if args.mcp_config:
         application_kwargs["mcp_config"] = args.mcp_config
+
+    # 默认 Host 接入真实 HostAgentRuntime（helper 找不到 / disabled 不影响启动）。
+    from app.agent import build_host_agent
+
+    agent_runtime, agent_host_status = build_host_agent(
+        helper_path=args.agent_helper,
+        enabled=False if args.disable_agent else None,
+    )
+    application_kwargs["agent_runtime"] = agent_runtime
+    application_kwargs["agent_host_status"] = agent_host_status
 
     try:
         application = Application(

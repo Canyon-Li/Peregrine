@@ -34,7 +34,13 @@ from app.automation import (
     register_automation_tools,
 )
 from app.checkpoint import SQLiteCheckpointStore
-from app.agent import AgentRuntime, register_agent_tools
+from app.agent import (
+    AgentHostStatus,
+    AgentLeaseHook,
+    AgentLeaseManager,
+    AgentRuntime,
+    register_agent_tools,
+)
 from app.context import (
     ContextManager,
     ContextSettings,
@@ -192,6 +198,7 @@ class Application:
         skill_learning_settings: SkillLearningSettings | None = None,
         web_approval: bool = False,
         agent_runtime: AgentRuntime | None = None,
+        agent_host_status: AgentHostStatus | None = None,
     ) -> None:
         self.database = Path(database).expanduser().resolve()
         self.tasks_dir = Path(tasks_dir).expanduser().resolve()
@@ -220,7 +227,8 @@ class Application:
         self.web_approval = web_approval
         # Agent Runtime：V0 只注入 Fake；None 时不注册 agent_* 工具。
         self._agent_runtime = agent_runtime
-
+        # Agent Host 状态（bootstrap 产物；None = 未配置 Agent）。
+        self.agent_host_status = agent_host_status
         self.settings = settings or ModelSettings()
         if registry is not None:
             # 测试注入的离线 registry：provider 直接取传入值（不校验 .env）。
@@ -253,6 +261,7 @@ class Application:
         self.approval_gate: Any | None = None
         self.web_approval_gate: WebApprovalGate | None = None
         self.agent_runtime: AgentRuntime | None = None
+        self.agent_lease: AgentLeaseManager | None = None
         self.tool_registry: ToolRegistry | None = None
         self.task_store: FileTaskStore | None = None
         self.memory_manager: MemoryManager | None = None
@@ -353,9 +362,20 @@ class Application:
 
         # Agent Runtime：V0 只接入 FakeAgentRuntime；未注入则不注册，
         # 普通 CLI / Server 现有功能完全不受影响。
+        agent_lease: AgentLeaseManager | None = None
+        agent_hooks = ()
         if self._agent_runtime is not None:
+            agent_lease = AgentLeaseManager(
+                database.parent / "agent" / "machine.lock"
+            )
+            agent_hooks = (AgentLeaseHook(agent_lease),)
             register_agent_tools(tool_registry, self._agent_runtime)
             self.agent_runtime = self._agent_runtime
+            # 真实 HostAgentRuntime 才有显式 start / close；
+            # FakeAgentRuntime 没有 start，用 getattr 探测，不影响现有路径。
+            start_runtime = getattr(self._agent_runtime, "start", None)
+            if callable(start_runtime):
+                await start_runtime()
 
         _mark_deferred_tools(tool_registry, _DEFERRED_TOOL_NAMES)
 
@@ -426,6 +446,7 @@ class Application:
             memory_maintenance_reflector=memory_maintenance_reflector,
             skill_store=skill_store,
             skill_context_provider=skill_context_provider,
+            tool_hooks=agent_hooks,
         )
 
         run_store = SQLiteRunStore(database)
@@ -434,6 +455,7 @@ class Application:
             checkpoint_store,
             runtime,
             approval_store=approval_store,
+            run_finalizers=(agent_lease.release,) if agent_lease else (),
         )
         # 启动 reconciliation（Run + Checkpoint 统一处理）。
         reconciled_runs = await run_manager.initialize()
@@ -492,6 +514,7 @@ class Application:
         self.mcp_manager = mcp_manager
         self.mcp_statuses = mcp_statuses
         self.mcp_error = mcp_error
+        self.agent_lease = agent_lease
         self.runtime = runtime
         self.run_store = run_store
         self.run_manager = run_manager
@@ -503,7 +526,7 @@ class Application:
         self._started = True
 
     async def close(self) -> None:
-        """优雅关闭 Scheduler / MCP / 模型适配器（幂等）。"""
+        """优雅关闭 Scheduler / MCP / Agent Runtime / 模型适配器（幂等）。"""
 
         if not self._started:
             return
@@ -511,8 +534,12 @@ class Application:
             await self.automation_scheduler.shutdown()
         if self.mcp_manager is not None and self.tool_registry is not None:
             await self.mcp_manager.close(self.tool_registry)
+        if self.agent_lease is not None:
+            self.agent_lease.close()
+        if self.agent_runtime is not None:
+            # 只在确实注入真实 HostAgentRuntime（有 close）时关闭 helper。
+            close_runtime = getattr(self.agent_runtime, "close", None)
+            if callable(close_runtime):
+                await close_runtime()
         await self.registry.close()
         self._started = False
-
-
-

@@ -1,8 +1,12 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 
+import { getAgentStatus, requestAgentPermission } from '../api/agent'
 import { getSystemInfo } from '../api/system'
+import AgentStatusView from '../components/AgentStatusView'
 
 export default function SettingsPage(): React.JSX.Element {
+  const queryClient = useQueryClient()
+
   const infoQuery = useQuery({
     queryKey: ['system-info'],
     queryFn: () => getSystemInfo(),
@@ -10,7 +14,25 @@ export default function SettingsPage(): React.JSX.Element {
     retry: false,
   })
 
+  const agentQuery = useQuery({
+    queryKey: ['agent-status'],
+    queryFn: () => getAgentStatus(),
+    refetchInterval: 5000,
+    retry: false,
+  })
+
   const web = window.peregrine
+
+  const doRequestPermission = async (
+    permission: 'automation' | 'screen_access',
+  ): Promise<void> => {
+    try {
+      await requestAgentPermission(permission)
+      void queryClient.invalidateQueries({ queryKey: ['agent-status'] })
+    } catch (err) {
+      console.warn('agent permission request failed', err)
+    }
+  }
 
   return (
     <div style={{ padding: 16, overflowY: 'auto', flex: 1, maxWidth: 640 }}>
@@ -50,6 +72,22 @@ export default function SettingsPage(): React.JSX.Element {
               </tr>
             </tbody>
           </table>
+        )}
+      </div>
+
+      <div className="panel" style={{ padding: 14, marginTop: 12 }}>
+        <h3 style={{ fontSize: 14, marginTop: 0 }}>Agent</h3>
+        <AgentStatusView
+          status={agentQuery.data ?? null}
+          loading={agentQuery.isLoading}
+          onRequestPermission={(p) => void doRequestPermission(p)}
+        />
+        {(agentQuery.data?.permissions.automation === 'required' ||
+          agentQuery.data?.permissions.screen_access === 'required') && (
+          <div className="text-dim" style={{ marginTop: 8 }}>
+            点击 Request 会打开系统权限提示；如果未立即生效，请到
+            System Settings → Privacy &amp; Security 手动开启。
+          </div>
         )}
       </div>
 
