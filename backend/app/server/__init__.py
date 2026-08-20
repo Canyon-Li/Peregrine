@@ -1,11 +1,30 @@
-"""Peregrine Agent Server：把现有 Agent Harness 界面化（FastAPI + WebSocket）。"""
+"""Peregrine Agent Server：本地 Host transport（FastAPI + JSON-RPC WebSocket）。"""
 
-from .app import __version__, create_app
-from .events import RpcBroadcastEventHandler, EventBroker
+from .app import create_app
+from .rpc import (
+    JsonRpcError,
+    RpcBroadcastEventHandler,
+    RpcConnection,
+    RpcContext,
+    RpcDispatcher,
+    RpcErrorCode,
+    RpcHub,
+    build_dispatcher,
+    parse_message,
+)
+from .version import __version__
 
 __all__ = [
+    "JsonRpcError",
     "RpcBroadcastEventHandler",
-    "EventBroker",
-    "__version__",
+    "RpcConnection",
+    "RpcContext",
+    "RpcDispatcher",
+    "RpcErrorCode",
+    "RpcHub",
+    "build_dispatcher",
     "create_app",
+    "parse_message",
+    "__version__",
 ]
+
