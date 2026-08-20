@@ -2,30 +2,42 @@
 
 import type { AgentEvent } from '../api/types'
 import { Icon } from './Icon'
-import { AssistantContent } from './MessageList'
+import { AssistantContent } from './AssistantContent'
+import AssistantReasoning from './AssistantReasoning'
 import { ActivityItems } from './RunActivity'
 
 export default function LiveAgentTurn({
   events,
   streamText,
+  reasoning,
+  settling = false,
 }: {
   events: AgentEvent[]
   streamText: string
+  reasoning?: string
+  settling?: boolean
 }): React.JSX.Element {
   return (
-    <section className="live-turn" aria-live="polite" aria-label="peregrine 实时执行过程">
-      <div className="live-turn__header">
+    <section
+      className={`live-turn${settling ? ' live-turn--settling' : ''}`}
+      aria-live="polite"
+      aria-label="peregrine 实时执行过程"
+    >
+      {/* 与最终 assistant 消息共用的作者行，仅多一个 live 指示点：
+          回复完成、容器被正式消息替换时，视觉不会跳变。 */}
+      <div className="message-assistant__author">
         <span className="message-assistant__avatar"><Icon name="agent" size={13} /></span>
-        <strong>peregrine is working</strong>
+        peregrine
         <span className="live-turn__pulse" aria-hidden="true" />
       </div>
-      <div className="live-turn__activity">
-        {events.length > 0 ? (
+      {events.length > 0 ? (
+        <div className="live-turn__activity">
           <ActivityItems events={events} />
-        ) : (
-          <div className="live-turn__starting">Starting the run…</div>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="live-turn__starting">Starting the run…</div>
+      )}
+      <AssistantReasoning text={reasoning ?? ''} />
       {streamText ? (
         <div className="live-turn__response">
           <AssistantContent content={streamText} />

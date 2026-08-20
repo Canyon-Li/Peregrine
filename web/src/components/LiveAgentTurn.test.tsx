@@ -30,7 +30,8 @@ function event(partial: Partial<AgentEvent>): AgentEvent {
 describe('LiveAgentTurn', () => {
   it('无事件时立即显示启动状态', () => {
     const html = renderToStaticMarkup(<LiveAgentTurn events={[]} streamText="" />)
-    expect(html).toContain('peregrine is working')
+    expect(html).toContain('peregrine')
+    expect(html).toContain('live-turn__pulse')
     expect(html).toContain('Starting the run')
   })
 
@@ -45,5 +46,25 @@ describe('LiveAgentTurn', () => {
     expect(html).toContain('正在生成')
     expect(html).toContain('<strong>报告</strong>')
     expect(html).toContain('stream-cursor')
+  })
+
+  it('展示模型思考过程（reasoning），默认折叠', () => {
+    const html = renderToStaticMarkup(
+      <LiveAgentTurn
+        events={[event({ type: 'model_completed' })]}
+        streamText="回复"
+        reasoning="先分析问题，再规划步骤"
+      />,
+    )
+    expect(html).toContain('思考过程')
+    expect(html).toContain('先分析问题，再规划步骤')
+    expect(html).toContain('<details class="assistant-reasoning"')
+  })
+
+  it('无 reasoning 时不渲染思考块', () => {
+    const html = renderToStaticMarkup(
+      <LiveAgentTurn events={[event({ type: 'model_completed' })]} streamText="回复" />,
+    )
+    expect(html).not.toContain('assistant-reasoning')
   })
 })
