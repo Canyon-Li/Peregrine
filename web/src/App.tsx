@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
 
 import { useEventsStore } from './stores/events'
+import { createWebNotificationController } from './notifications/web'
 import ApprovalsPage from './pages/ApprovalsPage'
+import ArtifactsPage from './pages/ArtifactsPage'
 import AutomationsPage from './pages/AutomationsPage'
 import ChatPage from './pages/ChatPage'
 import AgentPage from './pages/AgentPage'
@@ -14,6 +16,7 @@ export type PageKey =
   | 'runs'
   | 'automations'
   | 'approvals'
+  | 'artifacts'
   | 'agent'
   | 'settings'
 
@@ -35,6 +38,12 @@ export default function App(): React.JSX.Element {
     connect()
     return () => disconnect()
   }, [connect, disconnect])
+
+  useEffect(() => {
+    const controller = createWebNotificationController()
+    controller?.start()
+    return () => controller?.stop()
+  }, [])
 
   const navigate = (next: PageKey): void => {
     setPage(next)
@@ -59,6 +68,7 @@ export default function App(): React.JSX.Element {
           ))}
         {page === 'automations' && <AutomationsPage />}
         {page === 'approvals' && <ApprovalsPage />}
+        {page === 'artifacts' && <ArtifactsPage />}
         {page === 'agent' && <AgentPage />}
         {page === 'settings' && <SettingsPage />}
       </div>
@@ -79,6 +89,7 @@ function Sidebar({
     { key: 'runs', label: 'Runs' },
     { key: 'automations', label: 'Automations' },
     { key: 'approvals', label: 'Approvals' },
+    { key: 'artifacts', label: 'Artifacts' },
     { key: 'agent', label: 'Agent' },
     { key: 'settings', label: 'Settings' },
   ]

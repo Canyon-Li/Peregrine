@@ -7,6 +7,12 @@ interface PeregrineWebApi {
     node: string
     chrome: string
   }
+  openExternal: (url: string) => Promise<boolean>
+  notify: (notification: {
+    title: string
+    body: string
+    kind: 'approval' | 'run' | 'artifact'
+  }) => void
 }
 
 interface Window {

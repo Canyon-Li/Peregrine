@@ -5,6 +5,7 @@ from __future__ import annotations
 from ..dispatcher import RpcDispatcher
 from . import (
     approvals,
+    artifacts,
     automations,
     agent,
     conversations,
@@ -25,6 +26,7 @@ def build_dispatcher() -> RpcDispatcher:
     trace.register(dispatcher)
     automations.register(dispatcher)
     approvals.register(dispatcher)
+    artifacts.register(dispatcher)
     tasks.register(dispatcher)
     agent.register(dispatcher)
     return dispatcher
