@@ -56,6 +56,8 @@ class ApprovalRequest:
     description: str = ""
     run_id: str | None = None
     conversation_id: str | None = None
+    # 声明式审批落点：chat（审批进 Chat）。
+    ui_scope: str = "chat"
 
     def summary(self, *, max_arguments: int = 500) -> str:
         serialized = json.dumps(

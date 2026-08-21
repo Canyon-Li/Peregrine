@@ -77,6 +77,19 @@ class ToolPermission(StrEnum):
         return self is not ToolPermission.FORBIDDEN
 
 
+class ToolUiScope(StrEnum):
+    """工具审批的展示落点（声明式路由，前端不靠 tool_name 前缀猜测）。
+
+    - CHAT: 作用于宿主环境（shell、http…），审批属于对话工作流，
+      永远进 Chat。
+    - DESKTOP: 作用于用户真实界面（agent…），审批跟随用户注意力：
+      主窗口聚焦进 Chat，否则进 Floating Window。
+    """
+
+    CHAT = "chat"
+    DESKTOP = "web"
+
+
 class ToolDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -87,6 +100,7 @@ class ToolDefinition(BaseModel):
     )
     strict: bool | None = None
     permission: ToolPermission = ToolPermission.ALLOWED
+    ui_scope: ToolUiScope = ToolUiScope.CHAT
 
 
 class ToolResult(BaseModel):

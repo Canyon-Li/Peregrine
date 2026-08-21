@@ -41,6 +41,8 @@ class ApprovalRequest(BaseModel):
     tool_call_id: str = Field(min_length=1)
     arguments: dict[str, Any] = Field(default_factory=dict)
     reason: str = ""
+    # 声明式审批落点：chat（审批进 Chat）。
+    ui_scope: str = "chat"
     status: ApprovalRequestStatus = ApprovalRequestStatus.PENDING
     created_at: datetime
     resolved_at: datetime | None = None
