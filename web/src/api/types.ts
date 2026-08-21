@@ -141,6 +141,8 @@ export interface AgentEvent {
   provider: string | null
   model: string | null
   delta?: string | null
+  /** 流式思考增量（DeepSeek/Qwen reasoning_content delta）。 */
+  reasoning_delta?: string | null
   message: Message | null
   tool_call: ToolCall | null
   tool_result: {
@@ -154,6 +156,8 @@ export interface AgentEvent {
   usage: ModelUsage | null
   stop_reason: string | null
   approval_decision: string | null
+  /** agent_completed / agent_failed 携带的最终结果（含 usage / steps）。 */
+  result?: AgentResult | null
   [key: string]: unknown
 }
 

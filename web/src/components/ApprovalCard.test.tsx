@@ -43,4 +43,22 @@ describe('ApprovalCard', () => {
     )
     expect(html).toContain('disabled=""')
   })
+
+  it('web 审批显示人类可读动作名与描述', () => {
+    const agentApproval: ApprovalRequest = {
+      ...approval,
+      tool_name: 'agent_type',
+      arguments: { text: 'hello' },
+    }
+    const html = renderToStaticMarkup(
+      <ApprovalCard
+        approval={agentApproval}
+        onApprove={() => {}}
+        onDeny={() => {}}
+      />,
+    )
+    expect(html).toContain('Allow Type text?')
+    expect(html).toContain('Peregrine wants to type text')
+    expect(html).toContain('(agent_type)')
+  })
 })

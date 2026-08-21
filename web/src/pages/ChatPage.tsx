@@ -30,7 +30,6 @@ export default function ChatPage(): React.JSX.Element {
   const queryClient = useQueryClient()
   const eventsByRun = useEventsStore((state) => state.eventsByRun)
   const runStatuses = useEventsStore((state) => state.runStatuses)
-  const streamTextByRun = useEventsStore((state) => state.streamTextByRun)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [lastRunId, setLastRunId] = useState<string | null>(null)
   const [mode, setMode] = useState<AgentMode>('normal')
@@ -197,65 +196,11 @@ export default function ChatPage(): React.JSX.Element {
   const latestModelStep = [...activeEvents]
     .reverse()
     .find((event) => event.type === 'model_started')?.step
-  const streamedText =
-    progressRunId && latestModelStep !== null && latestModelStep !== undefined
-      ? (streamTextByRun[progressRunId]?.[latestModelStep] ?? '')
-      : ''
-  // 最近一次 model_completed 携带的模型思考内容（DeepSeek/Qwen reasoning）。
-  const latestModelReasoning =
-    [...activeEvents]
-      .reverse()
-      .find((event) => event.type === 'model_completed')?.message?.reasoning ?? ''
+  // 流式正文/思考由 LiveAgentTurn 内部按 run+step 细粒度订阅，ChatPage 不参与高频渲染。
 
-  // 流式限速：字符级平滑呈现，便于人眼观看（不快不慢）。
-  // 每 tick 只新增固定字符数，追上真实文本后自然等待下一批；
-  // 输出完毕/收起时一次性补全，交给落库消息原位切换。
-  const STREAM_TICK_MS = 24
-  const STREAM_CHARS_PER_TICK = 5
-  const [revealedText, setRevealedText] = useState('')
-  const revealedCountRef = useRef(0)
-  const targetRef = useRef('')
-  const textIdentityRef = useRef('')
-
-  // 新 Run / 新 step 开始时重置揭示进度；非流式状态直接显示全部。
-  useEffect(() => {
-    const identity = `${progressRunId}:${latestModelStep ?? ''}`
-    if (textIdentityRef.current !== identity) {
-      textIdentityRef.current = identity
-      revealedCountRef.current = 0
-    }
-    targetRef.current = streamedText
-    if (!(liveTurnActive && !liveTurnSettling && sendMutation.isPending)) {
-      revealedCountRef.current = streamedText.length
-      setRevealedText(streamedText)
-    }
-  }, [
-    liveTurnActive,
-    liveTurnSettling,
-    sendMutation.isPending,
-    streamedText,
-    progressRunId,
-    latestModelStep,
-  ])
-
-  // 流式期间开启揭示循环，输出完毕/收起时由上面的 effect 一次性补全。
-  useEffect(() => {
-    const streaming =
-      liveTurnActive && !liveTurnSettling && sendMutation.isPending
-    if (!streaming) return undefined
-    const interval = window.setInterval(() => {
-      const target = targetRef.current
-      const next = Math.min(
-        target.length,
-        revealedCountRef.current + STREAM_CHARS_PER_TICK,
-      )
-      if (next > revealedCountRef.current) {
-        revealedCountRef.current = next
-        setRevealedText(target.slice(0, next))
-      }
-    }, STREAM_TICK_MS)
-    return () => window.clearInterval(interval)
-  }, [liveTurnActive, liveTurnSettling, sendMutation.isPending])
+  // 流式揭示：已删除二次打字机（revealedText / setInterval / STREAM_TICK_MS / CHARS_PER_TICK）。
+  // Provider delta 由 events store 短时 batching（~33ms flush）批量提交，
+  // LiveAgentTurn 内部按 run+step 细粒度订阅，直接渲染最新文本；complete 时 store 立即 flush。
 
   const chooseExamplePrompt = (prompt: string): void => {
     setDraft(prompt)
@@ -264,14 +209,33 @@ export default function ChatPage(): React.JSX.Element {
     }
   }
 
-  // Agent 回复（流式文本 / 事件 / 新消息 / 结果出现）时自动滚动到底部。
+  // stick-to-bottom：用户靠近底部时自动跟随，向上滚动后停止强制拉底；
+  // 滚动更新用 rAF 合并，避免每个字符增量都强制同步布局。
+  const conversationScrollRef = useRef<HTMLDivElement>(null)
+  const stickToBottomRef = useRef(true)
+  const scrollFrameRef = useRef<number | null>(null)
+
+  const handleConversationScroll = (): void => {
+    const el = conversationScrollRef.current
+    if (!el) return
+    stickToBottomRef.current =
+      el.scrollHeight - el.scrollTop - el.clientHeight < 120
+  }
+
+  const scheduleScroll = (): void => {
+    if (scrollFrameRef.current !== null) return
+    scrollFrameRef.current = requestAnimationFrame(() => {
+      scrollFrameRef.current = null
+      const el = conversationScrollRef.current
+      if (el && stickToBottomRef.current) el.scrollTop = el.scrollHeight
+    })
+  }
+
   // 用聚合 key 而非原始引用，避免轮询 refetch（2s approvals / 3s artifacts）
   // 每次返回新引用导致空闲时反复拽回底部。
-  const conversationScrollRef = useRef<HTMLDivElement>(null)
   const autoScrollKey = [
     messages.length,
     messages.at(-1)?.content?.length ?? 0,
-    revealedText.length,
     activeEvents.length,
     sendMutation.isPending,
     artifacts.length,
@@ -282,8 +246,13 @@ export default function ChatPage(): React.JSX.Element {
     liveTurnActive,
   ].join('|')
   useEffect(() => {
-    const el = conversationScrollRef.current
-    if (el) el.scrollTop = el.scrollHeight
+    scheduleScroll()
+    return () => {
+      if (scrollFrameRef.current !== null) {
+        cancelAnimationFrame(scrollFrameRef.current)
+        scrollFrameRef.current = null
+      }
+    }
   }, [autoScrollKey])
 
   // 输出完毕（isPending 变 false 且会话数据已刷新）后：先让活动块平滑收起，
@@ -337,7 +306,11 @@ export default function ChatPage(): React.JSX.Element {
           onToggleActivity={() => setActivityOpen((open) => !open)}
         />
 
-        <div ref={conversationScrollRef} className={`conversation-scroll ${showNewConversationHome ? 'conversation-scroll--empty' : ''}`}>
+        <div
+          ref={conversationScrollRef}
+          onScroll={handleConversationScroll}
+          className={`conversation-scroll ${showNewConversationHome ? 'conversation-scroll--empty' : ''}`}
+        >
           <div className="message-thread">
             {selectedId === null ? (
               <section className="no-conversation">
@@ -361,9 +334,9 @@ export default function ChatPage(): React.JSX.Element {
 
             {liveTurnActive ? (
               <LiveAgentTurn
+                runId={progressRunId}
+                step={latestModelStep ?? null}
                 events={activeEvents}
-                streamText={revealedText}
-                reasoning={latestModelReasoning}
                 settling={liveTurnSettling}
               />
             ) : null}
@@ -423,6 +396,11 @@ export default function ChatPage(): React.JSX.Element {
             setOptimisticMessage({
               conversationId: selectedId,
               message: { role: 'user', content },
+            })
+            // 发送即定位到底部：避免先停留在上一条回复的位置，再等 live turn 出现。
+            requestAnimationFrame(() => {
+              const el = conversationScrollRef.current
+              if (el) el.scrollTop = el.scrollHeight
             })
             await sendMutation.mutateAsync({
               conversationId: selectedId,
