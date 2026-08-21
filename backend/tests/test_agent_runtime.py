@@ -1532,3 +1532,68 @@ async def test_memory_context_failure_does_not_block_agent_result() -> None:
 
     result = await asyncio.wait_for(runtime.run("继续"), timeout=5)
     assert result.content == "最终回答"
+
+
+@pytest.mark.asyncio
+async def test_agent_stagnation_halts_before_max_steps() -> None:
+    """不同 Agent 调用持续同错且界面无进展时，切换为无工具最终回答。"""
+
+    class StaleAgentTool(BaseTool):
+        def __init__(self, name: str) -> None:
+            self._definition = ToolDefinition(
+                name=name,
+                parameters={
+                    "type": "object",
+                    "properties": {"attempt": {"type": "integer"}},
+                },
+            )
+
+        @property
+        def definition(self) -> ToolDefinition:
+            return self._definition
+
+        async def execute(self, arguments: dict[str, object]) -> str:
+            raise RuntimeError("stale_observation: target window changed")
+
+    calls = (
+        ToolCall(
+            id="agent-1",
+            name="agent_click",
+            arguments={"attempt": 1},
+        ),
+        ToolCall(
+            id="agent-2",
+            name="agent_key",
+            arguments={"attempt": 2},
+        ),
+        ToolCall(
+            id="agent-3",
+            name="agent_type",
+            arguments={"attempt": 3},
+        ),
+    )
+    registry, adapter = fake_registry(
+        [
+            model_response(tool_calls=(calls[0],)),
+            model_response(tool_calls=(calls[1],)),
+            model_response(tool_calls=(calls[2],)),
+            model_response(content="目标持续变化，已停止工具操作。"),
+        ]
+    )
+    tools = ToolRegistry()
+    for name in ("agent_click", "agent_key", "agent_type"):
+        tools.register(StaleAgentTool(name))
+
+    result = await AgentRuntime(
+        registry,
+        tools,
+        provider="fake",
+        max_steps=10,
+    ).run("操作界面")
+
+    assert result.stop_reason is AgentStopReason.FINAL_ANSWER
+    assert result.steps == 4
+    assert result.content == "目标持续变化，已停止工具操作。"
+    assert adapter.requests[3].tools == ()
+    final_tool_result = json.loads(adapter.requests[3].messages[-2].content or "{}")
+    assert "Agent attempts halted" in final_tool_result["error"]

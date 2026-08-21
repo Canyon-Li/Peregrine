@@ -9,13 +9,16 @@ import {
   listConversations,
   sendMessage,
 } from '../api/conversations'
+import { cancelRun, listRuns, recoverRun } from '../api/runs'
 import { getTask, planAccept, planReject } from '../api/tasks'
 import type { AgentMode, Message, Task } from '../api/types'
+import { buildTurnView } from '../agent/turnPresentation'
 import { chatShouldShowApproval } from '../approval/agentApproval'
 import ApprovalCard from '../components/ApprovalCard'
 import ChatEmptyState from '../components/ChatEmptyState'
-import ChatHeader from '../components/ChatHeader'
+import RunStatusBar from '../components/RunStatusBar'
 import Composer from '../components/Composer'
+import type { ComposerCommand } from '../components/Composer'
 import ConversationList from '../components/ConversationList'
 import LiveAgentTurn from '../components/LiveAgentTurn'
 import MessageList from '../components/MessageList'
@@ -25,8 +28,13 @@ import RunActivity from '../components/RunActivity'
 import { Icon } from '../components/Icon'
 import { SectionHeader } from '../components/ui'
 import { useEventsStore } from '../stores/events'
+import type { PageKey } from '../App'
 
-export default function ChatPage(): React.JSX.Element {
+export default function ChatPage({
+  onNavigate,
+}: {
+  onNavigate?: (page: PageKey) => void
+}): React.JSX.Element {
   const queryClient = useQueryClient()
   const eventsByRun = useEventsStore((state) => state.eventsByRun)
   const runStatuses = useEventsStore((state) => state.runStatuses)
@@ -82,6 +90,38 @@ export default function ChatPage(): React.JSX.Element {
   }, [eventsByRun, runStatuses, selectedId])
   const activeRunId = liveRunId ?? lastRunId
   const activeRunStatus = activeRunId ? runStatuses[activeRunId] : undefined
+
+  // 后端 SQLite 是权威：会话切换/挂载时同步该会话 runs 的真实状态，避免历史
+  // run 因错过实时事件而长期停留在 running（例如取消广播丢失）。
+  useEffect(() => {
+    if (!selectedId) return
+    let cancelled = false
+    void listRuns({ conversationId: selectedId, limit: 50 })
+      .then((runs) => {
+        if (cancelled) return
+        const map: Record<string, string> = {}
+        for (const run of runs) map[run.id] = run.status
+        useEventsStore.getState().syncRunStatuses(map)
+      })
+      .catch(() => {
+        /* 同步失败不影响 UI；实时事件仍会工作 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [selectedId])
+
+  // conversation → 最近 run 状态（让会话列表呈现 Agent workspace 状态）。
+  const conversationStatus = useMemo(() => {
+    const map: Record<string, string> = {}
+    for (const [runId, events] of Object.entries(eventsByRun)) {
+      const conv = events.at(-1)?.conversation_id
+      if (!conv) continue
+      const status = runStatuses[runId]
+      if (status) map[conv] = status
+    }
+    return map
+  }, [eventsByRun, runStatuses])
 
   const approvalsQuery = useQuery({
     queryKey: ['chat-approvals', activeRunId],
@@ -178,6 +218,56 @@ export default function ChatPage(): React.JSX.Element {
     },
   })
 
+  const stopRun = async (): Promise<void> => {
+    if (!activeRunId) return
+    try {
+      const updated = await cancelRun(activeRunId)
+      // 即使 run.status 广播错过，也立即用 RPC 响应里的权威状态覆盖 store。
+      useEventsStore
+        .getState()
+        .syncRunStatuses({ [activeRunId]: updated.status })
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const recoverRunAction = async (): Promise<void> => {
+    if (!activeRunId) return
+    try {
+      const result = await recoverRun(activeRunId)
+      setLastRunId(result.run.id)
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  // Command palette（⌘K）：轻量能力入口，不做永久按钮墙。
+  const composerCommands: ComposerCommand[] = [
+    { id: 'new', label: 'New conversation', icon: 'plus', onSelect: () => newConversationMutation.mutate() },
+    {
+      id: 'plan',
+      label: mode === 'plan' ? 'Switch to Normal mode' : 'Switch to Plan mode',
+      icon: 'check',
+      onSelect: () => setMode((m) => (m === 'plan' ? 'normal' : 'plan')),
+    },
+    { id: 'agent', label: 'Open Agent', icon: 'agent', onSelect: () => onNavigate?.('agent') },
+    {
+      id: 'runs',
+      label: 'View current Run',
+      icon: 'runs',
+      onSelect: () => {
+        if (activeRunId) onNavigate?.('runs')
+      },
+    },
+    { id: 'stop', label: 'Stop Run', icon: 'close', onSelect: () => void stopRun() },
+    { id: 'artifacts', label: 'View artifacts', icon: 'artifacts', onSelect: () => onNavigate?.('artifacts') },
+    { id: 'settings', label: 'Settings', icon: 'settings', onSelect: () => onNavigate?.('settings') },
+  ]
+
   const storedMessages = conversationQuery.data?.messages ?? []
   const messages =
     optimisticMessage?.conversationId === selectedId
@@ -197,6 +287,19 @@ export default function ChatPage(): React.JSX.Element {
     .reverse()
     .find((event) => event.type === 'model_started')?.step
   // 流式正文/思考由 LiveAgentTurn 内部按 run+step 细粒度订阅，ChatPage 不参与高频渲染。
+
+  // Run Status Bar 数据：当前最重要的执行状态 + 统计。
+  const turnView = buildTurnView(activeEvents, { now: Date.now() })
+  const activeTool = turnView.tools.find(
+    (tool) => tool.state === 'active' || tool.state === 'waiting',
+  )
+  const currentAction = activeTool?.label ?? null
+  const startedEvent = activeEvents.find((event) => event.type === 'agent_started')
+  const startedAt = startedEvent ? Date.parse(startedEvent.event_time) : null
+  const failedEvent = [...activeEvents]
+    .reverse()
+    .find((event) => event.type === 'agent_failed')
+  const stopReason = failedEvent?.stop_reason ?? null
 
   // 流式揭示：已删除二次打字机（revealedText / setInterval / STREAM_TICK_MS / CHARS_PER_TICK）。
   // Provider delta 由 events store 短时 batching（~33ms flush）批量提交，
@@ -283,6 +386,7 @@ export default function ChatPage(): React.JSX.Element {
         <ConversationList
           conversations={conversations}
           selectedId={selectedId}
+          statusByConversation={conversationStatus}
           onSelect={(id) => {
             setSelectedId(id)
             setLastRunId(null)
@@ -297,13 +401,23 @@ export default function ChatPage(): React.JSX.Element {
       </aside>
 
       <main className="conversation-main">
-        <ChatHeader
+        <RunStatusBar
           title={selectedConversation?.title || 'New conversation'}
           conversationSidebarOpen={conversationSidebarOpen}
           onToggleConversationSidebar={() => setConversationSidebarOpen((open) => !open)}
           runStatus={activeRunStatus}
+          step={latestModelStep ?? turnView.steps}
+          toolCount={turnView.toolCount}
+          totalTokens={turnView.usage?.totalTokens ?? null}
+          durationMs={turnView.durationMs}
+          startedAt={startedAt}
+          currentAction={currentAction}
+          stopReason={stopReason}
+          mode={mode}
           activityOpen={activityOpen}
           onToggleActivity={() => setActivityOpen((open) => !open)}
+          onStop={() => void stopRun()}
+          onRecover={() => void recoverRunAction()}
         />
 
         <div
@@ -388,6 +502,7 @@ export default function ChatPage(): React.JSX.Element {
           onModeChange={setMode}
           value={draft}
           onValueChange={setDraft}
+          commands={composerCommands}
           onSend={async (content) => {
             if (!selectedId) return
             setSendError(null)

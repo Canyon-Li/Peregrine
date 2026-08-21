@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from app.agent.events import AgentEventHandler
+from app.agent.post_run_processor import PostRunProcessor
 from app.agent.runtime import AgentRuntime
 from app.approval import (
     WebApprovalGate,
@@ -44,6 +45,7 @@ from app.agent import (
     AgentLeaseHook,
     AgentLeaseManager,
     AgentRuntime,
+    AgentSessionManager,
     register_agent_tools,
 )
 from app.context import (
@@ -263,6 +265,9 @@ class Application:
         # 全局共享事件观察者（Server 在 start() 前注入 Web 广播 handler）。
         self.shared_event_handler = shared_event_handler
 
+        # Post-Run 后台任务（Memory Reflection 等）由 Application 统一管理生命周期。
+        self.post_run_processor = PostRunProcessor()
+
         # 在 start() 中构建的依赖。
         self.conversation_store: SQLiteConversationStore | None = None
         self.summary_store: SQLiteConversationSummaryStore | None = None
@@ -277,6 +282,7 @@ class Application:
         self.artifact_service: ArtifactService | None = None
         self.agent_runtime: AgentRuntime | None = None
         self.agent_lease: AgentLeaseManager | None = None
+        self.agent_session: AgentSessionManager | None = None
         self.tool_registry: ToolRegistry | None = None
         self.task_store: FileTaskStore | None = None
         self.memory_manager: MemoryManager | None = None
@@ -388,12 +394,30 @@ class Application:
         # Agent Runtime 可注入真实实现或测试 Fake；未注入则不注册，
         # 普通 CLI / Host 现有功能完全不受影响。
         agent_lease: AgentLeaseManager | None = None
+        agent_session: AgentSessionManager | None = None
         agent_hooks = ()
         if self._agent_runtime is not None:
+            agent_session = AgentSessionManager()
+            set_session_manager = getattr(
+                self._agent_runtime, "set_session_manager", None
+            )
+            if callable(set_session_manager):
+                set_session_manager(agent_session)
+            begin_session = getattr(
+                self._agent_runtime, "begin_session_rpc", None
+            )
             agent_lease = AgentLeaseManager(
                 database.parent / "agent" / "machine.lock"
             )
-            agent_hooks = (AgentLeaseHook(agent_lease),)
+            agent_hooks = (
+                AgentLeaseHook(
+                    agent_lease,
+                    agent_session,
+                    session_starter=(
+                        begin_session if callable(begin_session) else None
+                    ),
+                ),
+            )
             register_agent_tools(tool_registry, self._agent_runtime)
             self.agent_runtime = self._agent_runtime
             # 真实 HostAgentRuntime 才有显式 start / close；
@@ -472,15 +496,25 @@ class Application:
             skill_store=skill_store,
             skill_context_provider=skill_context_provider,
             tool_hooks=agent_hooks,
+            post_run_submit=self.post_run_processor.submit,
         )
 
         run_store = SQLiteRunStore(database)
+        # Run 终态 finalizer 顺序：先 end AgentSession（清 target/snapshot + 通知
+        # helper 清 Native 状态），再 release Machine Lease。
+        agent_finalizers: list[object] = []
+        if agent_session is not None:
+            end_session = getattr(self._agent_runtime, "end_session", None)
+            if callable(end_session):
+                agent_finalizers.append(end_session)
+        if agent_lease is not None:
+            agent_finalizers.append(agent_lease.release)
         run_manager = RunManager(
             run_store,
             checkpoint_store,
             runtime,
             approval_store=approval_store,
-            run_finalizers=(agent_lease.release,) if agent_lease else (),
+            run_finalizers=tuple(agent_finalizers),
         )
         # 启动 reconciliation（Run + Checkpoint 统一处理）。
         reconciled_runs = await run_manager.initialize()
@@ -542,6 +576,7 @@ class Application:
         self.mcp_statuses = mcp_statuses
         self.mcp_error = mcp_error
         self.agent_lease = agent_lease
+        self.agent_session = agent_session
         self.runtime = runtime
         self.run_store = run_store
         self.run_manager = run_manager
@@ -553,16 +588,21 @@ class Application:
         self._started = True
 
     async def close(self) -> None:
-        """优雅关闭 Scheduler / MCP / Agent Runtime / 模型适配器（幂等）。"""
+        """优雅关闭 Post-Run / Scheduler / MCP / Agent / 模型适配器（幂等）。"""
 
         if not self._started:
             return
+        # 先 drain post-run 后台任务（可能仍在用模型 registry / memory store），
+        # 避免 event loop 关闭时遗留 pending task；有界等待，超时后 cancel。
+        await self.post_run_processor.close()
         if self.automation_scheduler is not None:
             await self.automation_scheduler.shutdown()
         if self.mcp_manager is not None and self.tool_registry is not None:
             await self.mcp_manager.close(self.tool_registry)
         if self.agent_lease is not None:
             self.agent_lease.close()
+        if self.agent_session is not None:
+            self.agent_session.close()
         if self.agent_runtime is not None:
             # 只在确实注入真实 HostAgentRuntime（有 close）时关闭 helper。
             close_runtime = getattr(self.agent_runtime, "close", None)
