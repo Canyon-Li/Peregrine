@@ -5,6 +5,7 @@ import {
   AlertCircle,
   Archive,
   Bot,
+  Brain,
   Check,
   ChevronDown,
   Clock3,
@@ -39,6 +40,7 @@ export type IconName =
   | 'approvals'
   | 'artifacts'
   | 'agent'
+  | 'memory'
   | 'settings'
   | 'plus'
   | 'send'
@@ -66,6 +68,7 @@ const ICONS: Record<IconName, LucideIcon> = {
   approvals: ShieldCheck,
   artifacts: Archive,
   agent: Monitor,
+  memory: Brain,
   settings: Settings,
   plus: Plus,
   send: Send,

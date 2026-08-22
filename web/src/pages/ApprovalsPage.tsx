@@ -15,7 +15,6 @@ import {
 } from '../api/approvals'
 import type { ApprovalRequest, ApprovalStatus } from '../api/types'
 import {
-  agentActionLabel,
   isWebApproval,
 } from '../approval/agentApproval'
 import { PageShell } from '../components/PageShell'
@@ -45,6 +44,21 @@ const STATUS_TONE: Record<ApprovalStatus, 'warning' | 'success' | 'danger'> = {
   denied: 'danger',
 }
 
+const STATUS_LABEL: Record<ApprovalStatus, string> = {
+  pending: '待处理',
+  approved: '已批准',
+  denied: '已拒绝',
+}
+
+const AGENT_ACTION_LABEL: Record<string, string> = {
+  agent_click: '点击界面元素',
+  agent_type: '输入文字',
+  agent_key: '模拟按键与快捷键',
+  agent_scroll: '滚动当前窗口',
+  agent_open_app: '打开应用',
+  agent_focus: '聚焦窗口',
+}
+
 function ApprovalItem({
   approval,
   busy,
@@ -57,7 +71,9 @@ function ApprovalItem({
   onDeny: (id: string) => void
 }): React.JSX.Element {
   const web = isWebApproval(approval)
-  const title = web ? agentActionLabel(approval) : approval.tool_name
+  const title = web
+    ? (AGENT_ACTION_LABEL[approval.tool_name] ?? '操作这台主机')
+    : approval.tool_name
 
   return (
     <div className="approval-card">
@@ -70,7 +86,7 @@ function ApprovalItem({
         <div className="approval-card__content">
           <div className="approval-card__title-row">
             <strong className="approval-card__title">{title}</strong>
-            <Badge tone={STATUS_TONE[approval.status]}>{approval.status}</Badge>
+            <Badge tone={STATUS_TONE[approval.status]}>{STATUS_LABEL[approval.status]}</Badge>
           </div>
           {approval.reason ? (
             <div className="approval-card__reason">{approval.reason}</div>
@@ -81,13 +97,13 @@ function ApprovalItem({
             ) : null}
             {approval.run_id ? (
               <span className="text-muted">
-                run: {approval.run_id.slice(0, 8)}
+                Run：{approval.run_id.slice(0, 8)}
               </span>
             ) : null}
             <span className="text-muted">{formatTime(approval.created_at)}</span>
           </div>
           <details className="approval-card__details">
-            <summary>Show arguments</summary>
+            <summary>查看调用参数</summary>
             <pre>{formatArguments(approval.arguments)}</pre>
           </details>
         </div>
@@ -101,7 +117,7 @@ function ApprovalItem({
             disabled={busy}
             onClick={() => onApprove(approval.id)}
           >
-            Approve
+            批准
           </Button>
           <Button
             variant="danger"
@@ -109,7 +125,7 @@ function ApprovalItem({
             disabled={busy}
             onClick={() => onDeny(approval.id)}
           >
-            Deny
+            拒绝
           </Button>
         </div>
       ) : null}
@@ -171,15 +187,15 @@ export default function ApprovalsPage(): React.JSX.Element {
 
   return (
     <PageShell
-      title="Approvals"
-      subtitle="Review sensitive actions. All approvals are handled here."
+      title="审批"
+      subtitle="审查敏感操作；所有审批都在这里集中处理。"
     >
       <section className="approvals-section">
         <h2 className="approvals-section__title">
-          Pending {pending.length > 0 ? `(${pending.length})` : ''}
+          待处理 {pending.length > 0 ? `(${pending.length})` : ''}
         </h2>
         {pendingQuery.isPending ? (
-          <LoadingState label="Loading approvals…" />
+          <LoadingState label="正在加载审批…" />
         ) : pendingQuery.isError ? (
           <ErrorState
             message={String(pendingQuery.error)}
@@ -191,7 +207,7 @@ export default function ApprovalsPage(): React.JSX.Element {
           />
         ) : pending.length === 0 ? (
           <EmptyState
-            title="No approvals waiting"
+            title="暂无待处理审批"
             hint="需要确认的操作会显示在这里。"
             icon="approvals"
           />
@@ -215,10 +231,10 @@ export default function ApprovalsPage(): React.JSX.Element {
       </section>
 
       <section className="approvals-section">
-        <h2 className="approvals-section__title">Recent</h2>
+        <h2 className="approvals-section__title">最近记录</h2>
         {history.length === 0 ? (
           <div className="approval-history-empty">
-            No recent approval decisions.
+            暂无最近审批记录。
           </div>
         ) : (
           <div className="approvals-list">
