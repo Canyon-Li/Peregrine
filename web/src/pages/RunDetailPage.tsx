@@ -8,13 +8,15 @@ import { cancelRun, getRun, getRunTrace, recoverRun } from '../api/runs'
 import { buildTurnView, formatDuration, formatTokens, humanizeRunError } from '../agent/turnPresentation'
 import ArtifactList from '../components/ArtifactList'
 import AgentObservationPanel from '../components/AgentObservationPanel'
+import ContextInspector from '../components/ContextInspector'
 import { ConfirmDialog } from '../components/ConfirmDialog'
+import ExecutionTrace from '../components/ExecutionTrace'
 import { Icon } from '../components/Icon'
 import { ErrorState, LoadingState } from '../components/PageStates'
 import { PageShell } from '../components/PageShell'
 import { ActivityItems } from '../components/RunActivity'
 import RunBadge from '../components/RunBadge'
-import TraceTimeline from '../components/TraceTimeline'
+import UsageInspector from '../components/UsageInspector'
 import { toast } from '../stores/toasts'
 
 export default function RunDetailPage({ runId, onBack }: { runId: string; onBack: () => void }): React.JSX.Element {
@@ -84,8 +86,18 @@ export default function RunDetailPage({ runId, onBack }: { runId: string; onBack
               </section>
 
               <section className="run-detail-section">
+                <div className="section-heading"><div><h2>Usage</h2><p>Main Agent, Post-Run, cache, and Provider total</p></div></div>
+                <UsageInspector summary={traceQuery.data?.usage} />
+              </section>
+
+              <section className="run-detail-section">
                 <div className="section-heading"><div><h2>Execution</h2><p>Human-readable work timeline</p></div></div>
                 <ActivityItems events={events} />
+              </section>
+
+              <section className="run-detail-section">
+                <div className="section-heading"><div><h2>Context</h2><p>Per-step input, compaction, and cost analysis</p></div></div>
+                <ContextInspector events={events} />
               </section>
 
               <RunArtifactsSection artifacts={artifactsQuery.data ?? []} />
@@ -102,8 +114,8 @@ export default function RunDetailPage({ runId, onBack }: { runId: string; onBack
                 </section>
               ) : null}
 
-              <details className="run-technical">
-                <summary>Trace details</summary>
+              <section className="run-detail-section">
+                <div className="section-heading"><div><h2>Trace</h2><p>Complete execution events grouped by model step</p></div></div>
                 <dl className="technical-grid">
                   <div><dt>Run ID</dt><dd>{run.id}</dd></div>
                   <div><dt>Conversation</dt><dd>{run.conversation_id ?? '—'}</dd></div>
@@ -112,8 +124,8 @@ export default function RunDetailPage({ runId, onBack }: { runId: string; onBack
                   <div><dt>Stop reason</dt><dd>{run.stop_reason ?? '—'}</dd></div>
                   <div><dt>Raw error</dt><dd>{run.error ?? '—'}</dd></div>
                 </dl>
-                <TraceTimeline events={events} />
-              </details>
+                <ExecutionTrace events={events} />
+              </section>
             </div>
           ) : null}
       <ConfirmDialog

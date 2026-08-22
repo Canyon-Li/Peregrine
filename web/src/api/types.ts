@@ -59,6 +59,21 @@ export interface ModelUsage {
   input_tokens: number
   output_tokens: number
   total_tokens: number
+  cached_input_tokens?: number | null
+  uncached_input_tokens?: number | null
+  cache_read_input_tokens?: number | null
+  cache_write_input_tokens?: number | null
+  model_calls?: number
+}
+
+export interface RunUsageSummary {
+  main_agent: ModelUsage
+  memory_reflection: ModelUsage
+  memory_maintenance: ModelUsage
+  provider_total: ModelUsage
+  tool_schema_tokens_estimated: number
+  memory_reflection_status: string
+  memory_reflection_skip_reason: string | null
 }
 
 export interface AgentResult {
@@ -158,6 +173,36 @@ export interface AgentEvent {
   approval_decision: string | null
   /** agent_completed / agent_failed 携带的最终结果（含 usage / steps）。 */
   result?: AgentResult | null
+  original_estimated_input_tokens?: number | null
+  prepared_input_tokens?: number | null
+  estimated_input_tokens?: number | null
+  context_trimmed?: boolean | null
+  context_window?: number | null
+  input_budget?: number | null
+  working_input_budget?: number | null
+  trigger_tokens?: number | null
+  target_tokens?: number | null
+  usage_ratio?: number | null
+  tool_result_budget_tokens?: number | null
+  tool_result_tokens_before?: number | null
+  tool_result_tokens_after?: number | null
+  tool_schema_tokens?: number | null
+  message_tokens_before?: number | null
+  message_tokens_after?: number | null
+  original_usage_ratio?: number | null
+  prepared_usage_ratio?: number | null
+  compaction_stage?: string | null
+  compacted_tool_results?: number | null
+  removed_tool_rounds?: number | null
+  reached_target?: boolean | null
+  summary_updated?: boolean | null
+  summarized_conversation_blocks?: number | null
+  summary_error?: string | null
+  summary_usage?: ModelUsage | null
+  available_skill_count?: number | null
+  skill_catalog_tokens?: number | null
+  active_skill_names?: string[]
+  active_skill_tokens?: number | null
   [key: string]: unknown
 }
 
