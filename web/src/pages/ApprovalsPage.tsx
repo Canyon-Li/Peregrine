@@ -88,23 +88,28 @@ function ApprovalItem({
             <strong className="approval-card__title">{title}</strong>
             <Badge tone={STATUS_TONE[approval.status]}>{STATUS_LABEL[approval.status]}</Badge>
           </div>
-          {approval.reason ? (
-            <div className="approval-card__reason">{approval.reason}</div>
-          ) : null}
-          <div className="approval-card__meta">
-            {web ? (
-              <span className="text-muted">{approval.tool_name}</span>
-            ) : null}
-            {approval.run_id ? (
-              <span className="text-muted">
-                Run：{approval.run_id.slice(0, 8)}
-              </span>
-            ) : null}
-            <span className="text-muted">{formatTime(approval.created_at)}</span>
-          </div>
           <details className="approval-card__details">
-            <summary>查看调用参数</summary>
-            <pre>{formatArguments(approval.arguments)}</pre>
+            <summary>查看详情</summary>
+            <div className="approval-card__detail-body">
+              {approval.reason ? (
+                <div className="approval-card__reason">{approval.reason}</div>
+              ) : null}
+              <div className="approval-card__meta">
+                {web ? (
+                  <span className="text-muted">工具：{approval.tool_name}</span>
+                ) : null}
+                {approval.run_id ? (
+                  <span className="text-muted">
+                    Run：{approval.run_id.slice(0, 8)}
+                  </span>
+                ) : null}
+                <span className="text-muted">{formatTime(approval.created_at)}</span>
+              </div>
+              <div className="approval-card__arguments">
+                <span>调用参数</span>
+                <pre>{formatArguments(approval.arguments)}</pre>
+              </div>
+            </div>
           </details>
         </div>
       </div>
@@ -189,6 +194,7 @@ export default function ApprovalsPage(): React.JSX.Element {
     <PageShell
       title="审批"
       subtitle="审查敏感操作；所有审批都在这里集中处理。"
+      maxWidth={1360}
     >
       <section className="approvals-section">
         <h2 className="approvals-section__title">

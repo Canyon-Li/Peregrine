@@ -10,20 +10,107 @@ import { PageShell } from '../components/PageShell'
 
 type MemoryView = 'active' | 'archived'
 
+interface CoreMemoryDisplayItem {
+  label: string
+  content: string
+}
+
 function formatTime(value: string): string {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? value : date.toLocaleString('zh-CN')
 }
 
+function coreCategory(key: string): string {
+  const normalized = key.toLowerCase()
+  if (normalized.includes('preference')) return '偏好'
+  if (normalized.includes('identity') || normalized.includes('profile')) return '身份信息'
+  if (normalized.includes('constraint') || normalized.includes('rule')) return '长期约束'
+  if (normalized.includes('communication') || normalized.includes('language')) return '沟通方式'
+  if (normalized.includes('location') || normalized.includes('timezone')) return '常用环境'
+  return '核心信息'
+}
+
+function cleanCoreLine(line: string): string {
+  return line
+    .replace(/^\s*[-*+]\s+/, '')
+    .replace(/^\s*>\s?/, '')
+    .trim()
+}
+
+/** 将模型可见Markdown转换为面向用户的核心记忆条目，不暴露内部稳定key。 */
+export function parseCoreMemory(content: string): CoreMemoryDisplayItem[] {
+  const items: CoreMemoryDisplayItem[] = []
+  const legacy: string[] = []
+  let key: string | null = null
+  let values: string[] = []
+
+  const flush = (): void => {
+    const value = values.map(cleanCoreLine).filter(Boolean).join('\n')
+    if (key && value) items.push({ label: coreCategory(key), content: value })
+    key = null
+    values = []
+  }
+
+  for (const rawLine of content.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line === '```') continue
+    if (line === '# Core Memory' || line === '## Managed Core Entries') continue
+    const managedHeading = line.match(/^###\s+(.+)$/)
+    if (managedHeading) {
+      flush()
+      key = managedHeading[1].trim()
+      continue
+    }
+    if (key) values.push(rawLine)
+    else {
+      const readable = cleanCoreLine(rawLine.replace(/^#{1,6}\s+/, ''))
+      if (readable) legacy.push(readable)
+    }
+  }
+  flush()
+  if (legacy.length > 0) {
+    items.unshift({ label: '固定信息', content: legacy.join('\n') })
+  }
+  return items
+}
+
+export function CoreMemoryView({ content }: { content: string }): React.JSX.Element {
+  const items = parseCoreMemory(content)
+  return (
+    <div className="memory-core__content">
+      <div className="memory-core__visual" aria-hidden="true"><span /></div>
+      <div className="memory-core__body">
+        <div className="memory-core__summary">
+          <strong>始终随身携带</strong>
+          <span>{items.length} 条信息会进入每次运行</span>
+        </div>
+        <ol className="memory-core__entries">
+          {items.map((item, index) => (
+            <li key={`${item.label}-${index}`}>
+              <span className="memory-core__node" aria-hidden="true" />
+              <div><small>{item.label}</small><p>{item.content}</p></div>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </div>
+  )
+}
+
 export function MemoryCard({ memory }: { memory: LongTermMemory }): React.JSX.Element {
   return (
     <article className={`memory-card memory-card--${memory.status}`}>
-      <header className="memory-card__header">
-        <span className="mono">{memory.id}</span>
-        <span>{memory.status === 'active' ? '使用中' : '已归档'}</span>
-      </header>
-      <h3>{memory.title}</h3>
-      <p>{memory.summary}</p>
+      <div className="memory-card__identity">
+        <span className="memory-card__mark" aria-hidden="true" />
+        <div>
+          <header className="memory-card__header">
+            <span className="mono">{memory.id}</span>
+            <span>{memory.status === 'active' ? '可检索' : '已归档'}</span>
+          </header>
+          <h3>{memory.title}</h3>
+          <p>{memory.summary}</p>
+        </div>
+      </div>
       <dl className="memory-card__meta">
         <div><dt>版本</dt><dd>r{memory.revision}</dd></div>
         <div><dt>读取</dt><dd>{memory.access_count} 次</dd></div>
@@ -52,8 +139,8 @@ export default function MemoryPage(): React.JSX.Element {
   return (
     <PageShell
       title="长期记忆"
-      subtitle="查看 Peregrine 跨会话保留的稳定信息与历史经验。"
-      maxWidth={1080}
+      subtitle="查看 Peregrine 跨会话保留的稳定信息。"
+      maxWidth={1360}
       actions={
         <div className="segmented-control" aria-label="记忆筛选">
           <button className={view === 'active' ? 'active' : ''} onClick={() => setView('active')}>
@@ -69,13 +156,26 @@ export default function MemoryPage(): React.JSX.Element {
         : query.isError ? <ErrorState message={String(query.error)} onRetry={() => void query.refetch()} />
           : data ? (
             <div className="memory-page">
+              <section className="memory-overview" aria-label="长期记忆概览">
+                <div className="memory-overview__intro">
+                  <span className="memory-overview__eyebrow">记忆系统</span>
+                  <strong>少量常驻，按需回忆</strong>
+                  <p>核心记忆随每次运行进入上下文；普通记忆只提供索引，由模型在需要时读取。</p>
+                </div>
+                <dl className="memory-overview__stats">
+                  <div><dt>使用中</dt><dd>{data.active_count}</dd></div>
+                  <div><dt>容量</dt><dd>{data.max_active || '—'}</dd></div>
+                  <div><dt>已归档</dt><dd>{data.archived.length}</dd></div>
+                </dl>
+              </section>
+
               <section className="memory-core">
                 <div className="section-heading">
-                  <div><h2>核心记忆</h2><p>每次运行都会携带的少量长期信息</p></div>
-                  <span>{data.active_count} / {data.max_active || '—'} 条普通记忆</span>
+                  <div><h2>核心记忆</h2><p>稳定偏好与长期约束，每次运行都会携带</p></div>
+                  <span className="memory-core__badge">常驻上下文</span>
                 </div>
                 {data.core.trim() ? (
-                  <div className="memory-core__content">{data.core}</div>
+                  <CoreMemoryView content={data.core} />
                 ) : (
                   <p className="memory-empty-hint">暂无核心记忆。当用户明确表达稳定偏好或长期约束后，系统会在这里保留。</p>
                 )}
@@ -85,7 +185,7 @@ export default function MemoryPage(): React.JSX.Element {
                 <div className="section-heading">
                   <div>
                     <h2>{view === 'active' ? '普通记忆' : '归档记忆'}</h2>
-                    <p>{view === 'active' ? '模型可通过索引按需读取' : '不再进入索引，但仍然完整保留'}</p>
+                    <p>{view === 'active' ? `${memories.length} 条可通过索引按需读取` : `${memories.length} 条已退出索引但仍完整保留`}</p>
                   </div>
                 </div>
                 {memories.length === 0 ? (

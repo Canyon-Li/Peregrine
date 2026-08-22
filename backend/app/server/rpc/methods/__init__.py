@@ -9,6 +9,7 @@ from . import (
     automations,
     agent,
     conversations,
+    extensions,
     memories,
     runs,
     system,
@@ -31,6 +32,7 @@ def build_dispatcher() -> RpcDispatcher:
     tasks.register(dispatcher)
     agent.register(dispatcher)
     memories.register(dispatcher)
+    extensions.register(dispatcher)
     return dispatcher
 
 

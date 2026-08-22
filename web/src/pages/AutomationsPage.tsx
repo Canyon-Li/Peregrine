@@ -3,15 +3,13 @@ import { useState } from 'react'
 
 import {
   cancelAutomation,
-  createAutomation,
   listAutomations,
   pauseAutomation,
   resumeAutomation,
-  type CreateAutomationInput,
 } from '../api/automations'
-import AutomationForm from '../components/AutomationForm'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageStates'
+import { Icon } from '../components/Icon'
 import { PageShell } from '../components/PageShell'
 import { toast } from '../stores/toasts'
 
@@ -34,7 +32,7 @@ function scheduleText(schedule: {
     if (seconds % 60 === 0) return `每 ${seconds / 60} 分钟`
     return `每 ${seconds} 秒`
   }
-  return `定时计划 · ${schedule.timezone}`
+  return `${schedule.cron_expr ?? 'Cron'} · ${schedule.timezone}`
 }
 
 function formatTime(iso: string | null): string {
@@ -54,7 +52,6 @@ function automationStatusLabel(status: string): string {
 
 export default function AutomationsPage(): React.JSX.Element {
   const queryClient = useQueryClient()
-  const [showForm, setShowForm] = useState(false)
   const [cancelTarget, setCancelTarget] = useState<string | null>(null)
 
   const automationsQuery = useQuery({
@@ -68,18 +65,6 @@ export default function AutomationsPage(): React.JSX.Element {
     void queryClient.invalidateQueries({ queryKey: ['automations'] })
     void queryClient.invalidateQueries({ queryKey: ['runs'] })
   }
-
-  const createMutation = useMutation({
-    mutationFn: (input: CreateAutomationInput) => createAutomation(input),
-    onSuccess: () => {
-      setShowForm(false)
-      toast.success('自动化已创建')
-      invalidate()
-    },
-    onError: (err: unknown) => {
-      toast.error(err instanceof Error ? err.message : String(err))
-    },
-  })
 
   const controlMutation = useMutation({
     mutationFn: (action: { id: string; op: 'pause' | 'resume' | 'cancel' }) => {
@@ -101,25 +86,8 @@ export default function AutomationsPage(): React.JSX.Element {
   return (
     <PageShell
       title="自动化"
-      subtitle="让 Peregrine 在指定时间或周期内自动执行工作。"
-      actions={
-        <button
-          className="btn btn-primary btn-sm"
-          onClick={() => setShowForm((value) => !value)}
-        >
-          {showForm ? '收起' : '新建自动化'}
-        </button>
-      }
+      subtitle="查看并管理 Peregrine 根据你的要求创建的定时工作。"
     >
-      {showForm && (
-        <AutomationForm
-          onSubmit={async (input) => {
-            await createMutation.mutateAsync(input)
-          }}
-          onCancel={() => setShowForm(false)}
-        />
-      )}
-
       {automationsQuery.isPending ? (
         <LoadingState label="正在加载自动化…" />
       ) : automationsQuery.isError ? (
@@ -130,30 +98,52 @@ export default function AutomationsPage(): React.JSX.Element {
       ) : automations.length === 0 ? (
         <EmptyState
           title="暂无自动化"
-          hint="可以创建稍后执行或周期重复的工作。"
+          hint="在对话中告诉 Peregrine 需要何时执行什么工作，创建后会显示在这里。"
           icon="automations"
         />
       ) : (
         <div className="automation-list">
           {automations.map((automation) => (
-            <article key={automation.id} className={`automation-row automation-row--${automation.status}`}>
-              <div className="automation-row__main">
-                <div className="automation-row__heading">
-                  <strong>{automation.title}</strong>
-                  <span className={`automation-state automation-state--${automation.status}`}>{automationStatusLabel(automation.status)}</span>
+            <article key={automation.id} className={`automation-card automation-card--${automation.status}`}>
+              <header className="automation-card__header">
+                <div className="automation-card__identity">
+                  <span className="automation-card__icon"><Icon name="automations" size={16} /></span>
+                  <div>
+                    <strong>{automation.title}</strong>
+                    <span className="mono">{automation.id.slice(0, 8)}</span>
+                  </div>
                 </div>
+                <span className={`automation-state automation-state--${automation.status}`}>{automationStatusLabel(automation.status)}</span>
+              </header>
+
+              <details className="automation-card__description">
+                <summary><span>查看任务描述</span><Icon name="chevronDown" size={14} /></summary>
                 <p>{automation.prompt}</p>
-                <div className="automation-row__schedule">{scheduleText(automation.schedule)}</div>
+              </details>
+
+              <div className="automation-card__schedule">
+                <span>调度计划</span>
+                <strong>{scheduleText(automation.schedule)}</strong>
               </div>
-              <dl className="automation-row__timing">
+
+              <dl className="automation-card__timing">
                 <div><dt>下次执行</dt><dd>{formatTime(automation.next_run_at)}</dd></div>
                 <div><dt>上次执行</dt><dd>{formatTime(automation.last_run_at)}</dd></div>
               </dl>
-              <details className="automation-row__details">
-                <summary>计划详情</summary>
-                <code>{automation.schedule.cron_expr ?? automation.schedule.kind} · {automation.schedule.timezone}</code>
+
+              <details className="automation-card__details">
+                <summary><span>查看计划详情</span><Icon name="chevronDown" size={14} /></summary>
+                <dl>
+                  <div><dt>类型</dt><dd>{automation.schedule.kind === 'once' ? '单次' : automation.schedule.kind === 'interval' ? '固定间隔' : 'Cron'}</dd></div>
+                  <div><dt>时区</dt><dd>{automation.schedule.timezone}</dd></div>
+                  <div><dt>调度值</dt><dd className="mono">{automation.schedule.cron_expr ?? automation.schedule.interval_seconds ?? automation.schedule.run_at ?? '—'}</dd></div>
+                  <div><dt>最近 Run</dt><dd className="mono">{automation.last_run_id?.slice(0, 8) ?? '—'}</dd></div>
+                </dl>
               </details>
-              <div className="automation-row__actions">
+
+              <footer className="automation-card__footer">
+                <span className="automation-card__updated">更新于 {formatTime(automation.updated_at)}</span>
+                <div className="automation-row__actions">
                     <button
                       className="btn btn-sm"
                       disabled={automation.status !== 'active'}
@@ -175,7 +165,8 @@ export default function AutomationsPage(): React.JSX.Element {
                     >
                       取消
                     </button>
-              </div>
+                </div>
+              </footer>
             </article>
           ))}
         </div>
