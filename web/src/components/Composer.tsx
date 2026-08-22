@@ -1,19 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 
 import type { AgentMode } from '../api/types'
+import CommandPalette, { type ComposerCommand } from './CommandPalette'
 import { Icon } from './Icon'
-import type { IconName } from './Icon'
 
-export interface ComposerCommand {
-  id: string
-  label: string
-  icon?: IconName
-  onSelect: () => void
-}
+export type { ComposerCommand }
 
 export interface ComposerProps {
   disabled: boolean
   sending?: boolean
+  /** 当前 run 正在执行中：发送按钮转为暂停按钮。 */
+  running?: boolean
+  onStop?: () => void
   mode?: AgentMode
   onModeChange?: (mode: AgentMode) => void
   onSend: (content: string) => Promise<void>
@@ -26,6 +24,8 @@ export interface ComposerProps {
 export default function Composer({
   disabled,
   sending = false,
+  running = false,
+  onStop,
   mode = 'normal',
   onModeChange,
   onSend,
@@ -114,50 +114,35 @@ export default function Composer({
               </button>
             ))}
           </div>
-          <span className="composer__hint">Enter 发送 · Shift+Enter 换行</span>
-          {commands && commands.length > 0 ? (
+          {running ? (
             <button
               type="button"
-              className={`composer__cmd ${commandOpen ? 'active' : ''}`}
-              onClick={() => setCommandOpen((open) => !open)}
-              aria-expanded={commandOpen}
-              title="Commands (⌘K)"
-              aria-label="Commands"
+              className="composer__send composer__stop"
+              onClick={() => onStop?.()}
+              aria-label="暂停"
+              title="暂停"
             >
-              ⌘K
+              <Icon name="pause" size={16} />
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="composer__send"
-            onClick={() => void submit()}
-            disabled={!canSend}
-            aria-label={sending ? '正在发送' : '发送'}
-            title="发送"
-          >
-            {sending ? <span className="spinner spinner--light" /> : <Icon name="send" size={16} />}
-          </button>
+          ) : (
+            <button
+              type="button"
+              className="composer__send"
+              onClick={() => void submit()}
+              disabled={!canSend}
+              aria-label={sending ? '正在发送' : '发送'}
+              title="发送"
+            >
+              {sending ? <span className="spinner spinner--light" /> : <Icon name="send" size={16} />}
+            </button>
+          )}
         </div>
       </div>
-      {commands && commandOpen ? (
-        <div className="composer-commands" role="menu" aria-label="Commands">
-          {commands.map((command) => (
-            <button
-              key={command.id}
-              type="button"
-              role="menuitem"
-              className="composer-commands__item"
-              onClick={() => {
-                setCommandOpen(false)
-                command.onSelect()
-              }}
-            >
-              {command.icon ? <Icon name={command.icon} size={14} /> : null}
-              {command.label}
-            </button>
-          ))}
-        </div>
-      ) : null}
+      <CommandPalette
+        open={Boolean(commands?.length) && commandOpen}
+        commands={commands ?? []}
+        onClose={() => setCommandOpen(false)}
+      />
     </div>
   )
 }

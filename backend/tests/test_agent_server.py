@@ -395,6 +395,44 @@ def test_conversation_create_list_get(make_app) -> None:
             assert detail["messages"] == []
 
 
+def test_conversation_rename_and_delete(make_app) -> None:
+    app, _, _ = make_app()
+    with TestClient(app) as client:
+        with client.websocket_connect("/rpc") as websocket:
+            conversation_id = _require_result(
+                _rpc_call(websocket, 1, "conversation.create")[0]
+            )["conversation"]["id"]
+
+            renamed = _require_result(
+                _rpc_call(
+                    websocket,
+                    2,
+                    "conversation.rename",
+                    {"conversation_id": conversation_id, "title": "重命名后"},
+                )[0]
+            )
+            assert renamed["conversation"]["title"] == "重命名后"
+
+            deleted = _require_result(
+                _rpc_call(
+                    websocket,
+                    3,
+                    "conversation.delete",
+                    {"conversation_id": conversation_id},
+                )[0]
+            )
+            assert deleted["deleted"] is True
+
+            # 删除不存在的会话返回 not found。
+            message, _ = _rpc_call(
+                websocket,
+                4,
+                "conversation.delete",
+                {"conversation_id": conversation_id},
+            )
+            assert message["error"]["code"] == -32000
+
+
 def test_conversation_send_goes_through_service_and_writes_back(make_app) -> None:
     app, application, _ = make_app()
     with TestClient(app) as client:
@@ -565,8 +603,10 @@ def test_run_cancel_terminal_conflict(make_app) -> None:
                     {"conversation_id": conversation_id, "content": "运行"},
                 )[0]
             )["run"]["id"]
+            # run 已 completed：取消是幂等 no-op，返回当前终态，不再报 INVALID_STATE。
             message, _ = _rpc_call(websocket, 3, "run.cancel", {"run_id": run_id})
-            assert message["error"]["code"] == -32001
+            result = _require_result(message)
+            assert result["run"]["status"] == "completed"
 
 
 def test_run_recover_keeps_old_interrupted(make_app) -> None:

@@ -39,17 +39,17 @@ export default function SettingsPage(): React.JSX.Element {
   return (
     <PageShell
       title="Settings"
-      subtitle="Peregrine Host、系统权限与界面环境信息。"
+      subtitle="Host connection, Agent permissions, and Web environment."
       maxWidth={720}
     >
-      <div className="panel" style={{ padding: 14 }}>
-        <h3 style={{ fontSize: 14, marginTop: 0 }}>Peregrine Host</h3>
+      <section className="settings-section">
+        <h2>Peregrine Host</h2>
         {infoQuery.isLoading ? (
-          <div className="text-dim"><span className="spinner" /> 正在检查后端…</div>
+          <div className="text-dim"><span className="spinner" /> Checking Host…</div>
         ) : infoQuery.isError ? (
           <ErrorState
-            message="无法连接 Peregrine Host"
-            hint="请先在 backend 启动：python -m app.server，然后重试。"
+            message="Could not connect to Peregrine Host"
+            hint="Start python -m app.server from backend, then retry."
             onRetry={() => void infoQuery.refetch()}
           />
         ) : (
@@ -78,10 +78,10 @@ export default function SettingsPage(): React.JSX.Element {
             </tbody>
           </table>
         )}
-      </div>
+      </section>
 
-      <div className="panel" style={{ padding: 14, marginTop: 12 }}>
-        <h3 style={{ fontSize: 14, marginTop: 0 }}>Agent</h3>
+      <section className="settings-section">
+        <h2>Agent</h2>
         <AgentStatusView
           status={agentQuery.data ?? null}
           loading={agentQuery.isLoading}
@@ -89,15 +89,15 @@ export default function SettingsPage(): React.JSX.Element {
         />
         {(agentQuery.data?.permissions.automation === 'required' ||
           agentQuery.data?.permissions.screen_access === 'required') && (
-          <div className="text-dim" style={{ marginTop: 8 }}>
-            点击 Request 会打开系统权限提示；如果未立即生效，请到
-            System Settings → Privacy &amp; Security 手动开启。
+          <div className="settings-section__hint">
+            Request opens the system permission prompt. If the change is not immediate,
+            enable it in System Settings → Privacy &amp; Security.
           </div>
         )}
-      </div>
+      </section>
 
-      <div className="panel" style={{ padding: 14, marginTop: 12 }}>
-        <h3 style={{ fontSize: 14, marginTop: 0 }}>Web</h3>
+      <section className="settings-section">
+        <h2>Web</h2>
         <table className="table">
           <tbody>
             <tr>
@@ -122,7 +122,7 @@ export default function SettingsPage(): React.JSX.Element {
             </tr>
           </tbody>
         </table>
-      </div>
+      </section>
     </PageShell>
   )
 }

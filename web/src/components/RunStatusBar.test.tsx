@@ -14,11 +14,11 @@ const base = {
 }
 
 describe('RunStatusBar', () => {
-  it('无 Run 时显示 Idle 与标题', () => {
+  it('无 Run 时显示 Ready 与标题', () => {
     const html = renderToStaticMarkup(<RunStatusBar {...base} />)
-    expect(html).toContain('Idle')
+    expect(html).toContain('Ready')
     expect(html).toContain('打开备忘录输入你好')
-    expect(html).toContain('Activity')
+    expect(html).toContain('活动')
   })
 
   it('运行中显示 Working、Step/tools/tokens/duration 与 Stop', () => {
@@ -73,7 +73,7 @@ describe('RunStatusBar', () => {
     expect(html).toContain('10 steps')
     expect(html).toContain('8 tools')
     expect(html).toContain('24.1k tokens')
-    expect(html).toContain('Activity')
+    expect(html).toContain('活动')
   })
 
   it('interrupted 提供 Recover 动作', () => {

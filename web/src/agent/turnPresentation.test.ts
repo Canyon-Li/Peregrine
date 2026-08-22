@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentEvent } from '../api/types'
 import {
+  buildAgentContext,
   buildTurnView,
   formatDuration,
   formatTokens,
@@ -58,7 +59,7 @@ describe('buildTurnView: tool timeline', () => {
     ])
     expect(view.tools).toHaveLength(1)
     expect(view.tools[0].state).toBe('done')
-    expect(view.tools[0].label).toBe('Typed text')
+    expect(view.tools[0].label).toBe('已输入 “测试”')
     expect(view.toolCount).toBe(1)
     expect(view.durationMs).toBe(10_000)
   })
@@ -73,7 +74,7 @@ describe('buildTurnView: tool timeline', () => {
       }),
     ])
     expect(view.tools[0].state).toBe('failed')
-    expect(view.tools[0].label).toBe('Click failed')
+    expect(view.tools[0].label).toBe('点击失败')
   })
 
   it('toolCount 按 tool_call_id 去重', () => {
@@ -239,15 +240,15 @@ describe('label helpers', () => {
   })
 
   it('toolActiveLabel 带参数摘要', () => {
-    expect(toolActiveLabel('agent_type', { text: '测试' })).toBe('Typing “测试”')
-    expect(toolActiveLabel('read_file', { path: '/tmp/a.md' })).toBe('Reading /tmp/a.md')
-    expect(toolActiveLabel('agent_key', { key: 'n', modifiers: 'command' })).toBe('Pressing ⌘ N')
-    expect(toolActiveLabel('unknown_tool', {})).toBe('Running unknown tool')
+    expect(toolActiveLabel('agent_type', { text: '测试' })).toBe('输入 “测试”')
+    expect(toolActiveLabel('read_file', { path: '/tmp/a.md' })).toBe('读取 /tmp/a.md')
+    expect(toolActiveLabel('agent_key', { key: 'n', modifiers: 'command' })).toBe('按键 ⌘ N')
+    expect(toolActiveLabel('unknown_tool', {})).toBe('运行 unknown tool')
   })
 
   it('toolDoneLabel 完成/失败', () => {
-    expect(toolDoneLabel('agent_type', { text: 'x' }, true)).toBe('Typed text')
-    expect(toolDoneLabel('agent_type', { text: 'x' }, false)).toBe('Typing failed')
+    expect(toolDoneLabel('agent_type', { text: 'x' }, true)).toBe('已输入 “x”')
+    expect(toolDoneLabel('agent_type', { text: 'x' }, false)).toBe('输入失败')
   })
 })
 
@@ -258,6 +259,56 @@ describe('parseVerificationStatus', () => {
     expect(parseVerificationStatus('{"frontmost_verified":true}')).toBe('verified')
     expect(parseVerificationStatus('hello')).toBeNull()
     expect(parseVerificationStatus(null)).toBeNull()
+  })
+})
+
+describe('buildAgentContext', () => {
+  it('组合 Observation target、窗口、最近动作和验证状态', () => {
+    const events = [
+      event({
+        type: 'tool_started',
+        tool_call: toolCall('t1', 'agent_type', { text: ' Peregrine' }),
+      }),
+      event({
+        type: 'tool_completed',
+        tool_call: toolCall('t1', 'agent_type', {}),
+        tool_result: {
+          tool_call_id: 't1',
+          tool_name: 'agent_type',
+          success: true,
+          output: '{"verification_status":"verified","execution_mode":"background_ax"}',
+          error: null,
+          duration_ms: 20,
+        },
+      }),
+    ]
+    const context = buildAgentContext(events, {
+      id: 'snapshot-1',
+      created_at: null,
+      active_app: { name: 'Peregrine', bundle_id: null, pid: 1 },
+      target: { name: 'TextPadoror', bundle_id: 'com.example.TextPadoror', pid: 2 },
+      active_window: {
+        ref: 'w1', title: 'Untitled', bounds: { x: 0, y: 0, width: 1, height: 1 },
+      },
+      windows: [],
+      elements: [],
+      screenshot_ref: null,
+    })
+    expect(context.target).toBe('TextPadoror')
+    expect(context.window).toBe('Untitled')
+    expect(context.lastAction).toBe('已输入 “ Peregrine”')
+    expect(context.verification).toBe('Verified')
+    expect(context.executionMode).toBe('background ax')
+  })
+
+  it('没有 Session 证据时不虚构目标', () => {
+    expect(buildAgentContext([], null)).toMatchObject({
+      target: null,
+      window: null,
+      lastAction: null,
+      verification: null,
+      recentActions: [],
+    })
   })
 })
 

@@ -5,17 +5,20 @@ import { approveApproval, denyApproval, listApprovals } from '../api/approvals'
 import { listArtifacts } from '../api/artifacts'
 import {
   createConversation,
+  deleteConversation,
   getConversation,
   listConversations,
+  renameConversation,
   sendMessage,
 } from '../api/conversations'
-import { cancelRun, listRuns, recoverRun } from '../api/runs'
+import { cancelRun, interruptRun, listRuns, recoverRun } from '../api/runs'
 import { getTask, planAccept, planReject } from '../api/tasks'
 import type { AgentMode, Message, Task } from '../api/types'
 import { buildTurnView } from '../agent/turnPresentation'
 import { chatShouldShowApproval } from '../approval/agentApproval'
 import ApprovalCard from '../components/ApprovalCard'
 import ChatEmptyState from '../components/ChatEmptyState'
+import ChatSidePanel from '../components/ChatSidePanel'
 import RunStatusBar from '../components/RunStatusBar'
 import Composer from '../components/Composer'
 import type { ComposerCommand } from '../components/Composer'
@@ -38,12 +41,21 @@ export default function ChatPage({
   const queryClient = useQueryClient()
   const eventsByRun = useEventsStore((state) => state.eventsByRun)
   const runStatuses = useEventsStore((state) => state.runStatuses)
+  const connected = useEventsStore((state) => state.connected)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [lastRunId, setLastRunId] = useState<string | null>(null)
   const [mode, setMode] = useState<AgentMode>('normal')
   const [draft, setDraft] = useState('')
   const [conversationSidebarOpen, setConversationSidebarOpen] = useState(true)
-  const [activityOpen, setActivityOpen] = useState(false)
+  // 右侧面板点击顺序：先点击的排前面（竖向排列时在上方），后点击的追加到下面。
+  const [panelOrder, setPanelOrder] = useState<('panel' | 'activity')[]>(['panel'])
+  const togglePanel = (which: 'panel' | 'activity'): void => {
+    setPanelOrder((prev) =>
+      prev.includes(which)
+        ? prev.filter((p) => p !== which)
+        : [...prev, which],
+    )
+  }
   const [planTask, setPlanTask] = useState<Task | null>(null)
   const [planResolved, setPlanResolved] = useState<string | null>(null)
   const [optimisticMessage, setOptimisticMessage] = useState<{
@@ -51,9 +63,8 @@ export default function ChatPage({
     message: Message
   } | null>(null)
   const [sendError, setSendError] = useState<string | null>(null)
-  // LiveAgentTurn 生命周期：流式中 → 收起动画（settling）→ 原位切换为落库消息。
+  // Persistent AgentTurn：完成后仍保留为本轮 Work Record。
   const [liveTurnActive, setLiveTurnActive] = useState(false)
-  const [liveTurnSettling, setLiveTurnSettling] = useState(false)
 
 
   const conversationsQuery = useQuery({
@@ -90,9 +101,18 @@ export default function ChatPage({
   }, [eventsByRun, runStatuses, selectedId])
   const activeRunId = liveRunId ?? lastRunId
   const activeRunStatus = activeRunId ? runStatuses[activeRunId] : undefined
+  const isRunning = Boolean(activeRunId) &&
+    (activeRunStatus === 'running' || activeRunStatus === 'pending')
 
-  // 后端 SQLite 是权威：会话切换/挂载时同步该会话 runs 的真实状态，避免历史
-  // run 因错过实时事件而长期停留在 running（例如取消广播丢失）。
+  // 实时 Run 一旦出现就记住 id；终态通知可能早于 conversation.send 返回，
+  // 不能因 running → completed 让 Persistent AgentTurn 短暂丢失事件。
+  useEffect(() => {
+    if (liveRunId) setLastRunId(liveRunId)
+  }, [liveRunId])
+
+  // 后端 SQLite 是权威：会话切换/挂载/断线重连（后端重启）时同步该会话 runs 的
+  // 真实状态，避免历史 run 因错过实时事件而长期停留在 running/pending（暂停
+  // 按钮、LiveAgentTurn 卡住的根源）；重连后同时刷新会话数据。
   useEffect(() => {
     if (!selectedId) return
     let cancelled = false
@@ -106,21 +126,34 @@ export default function ChatPage({
       .catch(() => {
         /* 同步失败不影响 UI；实时事件仍会工作 */
       })
+    if (connected) {
+      void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+    }
     return () => {
       cancelled = true
     }
-  }, [selectedId])
+  }, [selectedId, connected, queryClient])
 
   // conversation → 最近 run 状态（让会话列表呈现 Agent workspace 状态）。
-  const conversationStatus = useMemo(() => {
+  const { conversationStatus, conversationActivity } = useMemo(() => {
     const map: Record<string, string> = {}
+    const activity: Record<string, string> = {}
+    const latestTimes: Record<string, string> = {}
     for (const [runId, events] of Object.entries(eventsByRun)) {
-      const conv = events.at(-1)?.conversation_id
+      const latest = events.at(-1)
+      const conv = latest?.conversation_id
       if (!conv) continue
+      if (latestTimes[conv] && latestTimes[conv] > latest.event_time) continue
+      latestTimes[conv] = latest.event_time
       const status = runStatuses[runId]
       if (status) map[conv] = status
+      const turn = buildTurnView(events, { now: Date.now() })
+      if (turn.currentAction) activity[conv] = turn.currentAction
+      else if (turn.targetApp) activity[conv] = turn.targetApp
     }
-    return map
+    return { conversationStatus: map, conversationActivity: activity }
   }, [eventsByRun, runStatuses])
 
   const approvalsQuery = useQuery({
@@ -163,10 +196,40 @@ export default function ChatPage({
       setPlanTask(null)
       setPlanResolved(null)
       setLiveTurnActive(false)
-      setLiveTurnSettling(false)
       void queryClient.invalidateQueries({ queryKey: ['conversations'] })
     },
   })
+
+  /** 重命名会话（接入后端）。 */
+  const renameConversationAction = async (id: string, title: string): Promise<void> => {
+    try {
+      await renameConversation(id, title)
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['conversation', id] })
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /** 删除会话（接入后端）；删除当前会话时切到下一个。 */
+  const deleteConversationAction = async (id: string): Promise<void> => {
+    try {
+      await deleteConversation(id)
+      if (id === selectedId) {
+        const next = conversations.find((c) => c.id !== id)?.id ?? null
+        setSelectedId(next)
+        setLastRunId(null)
+        setPlanTask(null)
+        setPlanResolved(null)
+        setLiveTurnActive(false)
+        setPanelOrder((prev) => prev.filter((p) => p !== 'activity'))
+      }
+      void queryClient.invalidateQueries({ queryKey: ['conversations'] })
+      void queryClient.invalidateQueries({ queryKey: ['conversation', id] })
+    } catch (error) {
+      setSendError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   const sendMutation = useMutation({
     mutationFn: ({
@@ -203,6 +266,18 @@ export default function ChatPage({
     onSettled: () => setOptimisticMessage(null),
   })
 
+  // 断线重连兜底：若发送请求在断线期间未 settle（异常路径，正常断线 rpcClient
+  // 会 reject 挂起请求），连接恢复时重置，避免 Composer 输入框被 sending 锁死。
+  const prevConnectedRef = useRef(connected)
+  useEffect(() => {
+    const reconnected = !prevConnectedRef.current && connected
+    prevConnectedRef.current = connected
+    if (reconnected && sendMutation.isPending) {
+      setOptimisticMessage(null)
+      sendMutation.reset()
+    }
+  }, [connected, sendMutation])
+
   const resolvePlanMutation = useMutation({
     mutationFn: (action: { taskId: string; decision: 'accept' | 'reject' }) =>
       action.decision === 'accept'
@@ -229,7 +304,17 @@ export default function ChatPage({
       void queryClient.invalidateQueries({ queryKey: ['runs'] })
       void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
     } catch (error) {
-      setSendError(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      const stateMatch = /cannot cancel run in state (\w+)/.exec(message)
+      if (activeRunId && stateMatch) {
+        // run 已进入终态（状态广播延迟导致暂停按钮仍可点）：修正本地状态，
+        // 这是用户点暂停的正常收敛路径，不当作错误提示。
+        useEventsStore.getState().syncRunStatuses({ [activeRunId]: stateMatch[1] })
+        void queryClient.invalidateQueries({ queryKey: ['runs'] })
+        void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+      } else {
+        setSendError(message)
+      }
     }
   }
 
@@ -242,6 +327,31 @@ export default function ChatPage({
       void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
     } catch (error) {
       setSendError(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  /** 暂停（中断）Run：保留 Checkpoint，可从断点继续（Recover）。 */
+  const pauseRun = async (): Promise<void> => {
+    if (!activeRunId) return
+    try {
+      const updated = await interruptRun(activeRunId)
+      // 即使 run.status 广播错过，也立即用 RPC 响应里的权威状态覆盖 store。
+      useEventsStore
+        .getState()
+        .syncRunStatuses({ [activeRunId]: updated.status })
+      void queryClient.invalidateQueries({ queryKey: ['runs'] })
+      void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      const stateMatch = /cannot interrupt run in state (\w+)/.exec(message)
+      if (activeRunId && stateMatch) {
+        // run 已进入终态（状态广播延迟）：修正本地状态，不当作错误提示。
+        useEventsStore.getState().syncRunStatuses({ [activeRunId]: stateMatch[1] })
+        void queryClient.invalidateQueries({ queryKey: ['runs'] })
+        void queryClient.invalidateQueries({ queryKey: ['conversation', selectedId] })
+      } else {
+        setSendError(message)
+      }
     }
   }
 
@@ -273,15 +383,15 @@ export default function ChatPage({
     optimisticMessage?.conversationId === selectedId
       ? [...storedMessages, optimisticMessage.message]
       : storedMessages
-  // 流式/收起动画期间，最后一条尚未“正式落库”的 assistant 回复由 LiveAgentTurn
-  // 原位展示，避免落库瞬间与流式回复重复、以及回复重排造成的“跳一下”。
+  const showAgentTurn = liveTurnActive || liveRunId !== null
+  // Persistent AgentTurn 已承载最新 assistant reply，避免与落库消息重复。
   const displayMessages =
-    liveTurnActive && messages.at(-1)?.role === 'assistant'
+    showAgentTurn && messages.at(-1)?.role === 'assistant'
       ? messages.slice(0, -1)
       : messages
   const selectedConversation = conversations.find((item) => item.id === selectedId)
   const showNewConversationHome = selectedId !== null && messages.length === 0
-  const progressRunId = sendMutation.isPending ? liveRunId : activeRunId
+  const progressRunId = activeRunId
   const activeEvents = progressRunId ? (eventsByRun[progressRunId] ?? []) : []
   const latestModelStep = [...activeEvents]
     .reverse()
@@ -290,10 +400,7 @@ export default function ChatPage({
 
   // Run Status Bar 数据：当前最重要的执行状态 + 统计。
   const turnView = buildTurnView(activeEvents, { now: Date.now() })
-  const activeTool = turnView.tools.find(
-    (tool) => tool.state === 'active' || tool.state === 'waiting',
-  )
-  const currentAction = activeTool?.label ?? null
+  const currentAction = turnView.currentAction
   const startedEvent = activeEvents.find((event) => event.type === 'agent_started')
   const startedAt = startedEvent ? Date.parse(startedEvent.event_time) : null
   const failedEvent = [...activeEvents]
@@ -346,7 +453,7 @@ export default function ChatPage({
     planTask?.id ?? null,
     sendError,
     selectedId,
-    liveTurnActive,
+    showAgentTurn,
   ].join('|')
   useEffect(() => {
     scheduleScroll()
@@ -358,25 +465,6 @@ export default function ChatPage({
     }
   }, [autoScrollKey])
 
-  // 输出完毕（isPending 变 false 且会话数据已刷新）后：先让活动块平滑收起，
-  // 再原位切换为正式消息，避免瞬间卸载导致的“跳一下”。
-  useEffect(() => {
-    if (!liveTurnActive) return
-    if (sendMutation.isPending) return
-    if (conversationQuery.isLoading || conversationQuery.isFetching) return
-    setLiveTurnSettling(true)
-    const timer = window.setTimeout(() => {
-      setLiveTurnActive(false)
-      setLiveTurnSettling(false)
-    }, 340)
-    return () => window.clearTimeout(timer)
-  }, [
-    liveTurnActive,
-    sendMutation.isPending,
-    conversationQuery.isLoading,
-    conversationQuery.isFetching,
-  ])
-
   return (
     <div className="chat-workspace">
       <aside
@@ -387,20 +475,22 @@ export default function ChatPage({
           conversations={conversations}
           selectedId={selectedId}
           statusByConversation={conversationStatus}
+          activityByConversation={conversationActivity}
           onSelect={(id) => {
             setSelectedId(id)
             setLastRunId(null)
             setPlanTask(null)
             setPlanResolved(null)
-            setActivityOpen(false)
+            setPanelOrder((prev) => prev.filter((p) => p !== 'activity'))
             setLiveTurnActive(false)
-            setLiveTurnSettling(false)
           }}
           onNew={() => newConversationMutation.mutate()}
+          onRename={(id, title) => void renameConversationAction(id, title)}
+          onDelete={(id) => void deleteConversationAction(id)}
         />
       </aside>
 
-      <main className="conversation-main">
+      <div className="chat-right">
         <RunStatusBar
           title={selectedConversation?.title || 'New conversation'}
           conversationSidebarOpen={conversationSidebarOpen}
@@ -414,22 +504,26 @@ export default function ChatPage({
           currentAction={currentAction}
           stopReason={stopReason}
           mode={mode}
-          activityOpen={activityOpen}
-          onToggleActivity={() => setActivityOpen((open) => !open)}
+          turnState={activeEvents.length > 0 ? turnView.status : undefined}
+          activityOpen={panelOrder.includes('activity')}
+          onToggleActivity={() => togglePanel('activity')}
+          panelOpen={panelOrder.includes('panel')}
+          onTogglePanel={() => togglePanel('panel')}
           onStop={() => void stopRun()}
           onRecover={() => void recoverRunAction()}
         />
-
-        <div
-          ref={conversationScrollRef}
+        <div className="chat-right__body">
+          <main className="conversation-main">
+            <div
+              ref={conversationScrollRef}
           onScroll={handleConversationScroll}
           className={`conversation-scroll ${showNewConversationHome ? 'conversation-scroll--empty' : ''}`}
         >
           <div className="message-thread">
             {selectedId === null ? (
               <section className="no-conversation">
-                <div className="chat-empty__mark">oa</div>
-                <h1>Start a conversation</h1>
+                <div className="chat-empty__mark">V</div>
+                <h1>Start new work</h1>
                 <p>Create a conversation, then give Peregrine something to work on.</p>
                 <button
                   type="button"
@@ -446,12 +540,17 @@ export default function ChatPage({
               <MessageList messages={displayMessages} />
             )}
 
-            {liveTurnActive ? (
+            {showAgentTurn ? (
               <LiveAgentTurn
                 runId={progressRunId}
                 step={latestModelStep ?? null}
                 events={activeEvents}
-                settling={liveTurnSettling}
+                onRecover={() => void recoverRunAction()}
+                onInspect={() =>
+                  setPanelOrder((prev) =>
+                    prev.includes('activity') ? prev : [...prev, 'activity'],
+                  )
+                }
               />
             ) : null}
 
@@ -498,6 +597,8 @@ export default function ChatPage({
         <Composer
           disabled={selectedId === null}
           sending={sendMutation.isPending}
+          running={isRunning}
+          onStop={() => void pauseRun()}
           mode={mode}
           onModeChange={setMode}
           value={draft}
@@ -506,8 +607,8 @@ export default function ChatPage({
           onSend={async (content) => {
             if (!selectedId) return
             setSendError(null)
+            setLastRunId(null)
             setLiveTurnActive(true)
-            setLiveTurnSettling(false)
             setOptimisticMessage({
               conversationId: selectedId,
               message: { role: 'user', content },
@@ -523,14 +624,21 @@ export default function ChatPage({
               sendMode: mode,
             })
           }}
-        />
-      </main>
-
-      {activityOpen ? (
-        <div className="activity-drawer">
-          <RunActivity runId={activeRunId} onClose={() => setActivityOpen(false)} />
+          />
+          </main>
+          <div className="chat-panels">
+        {panelOrder.map((which) =>
+          which === 'panel' ? (
+            <ChatSidePanel key="panel" />
+          ) : (
+            <div key="activity" className="activity-drawer">
+              <RunActivity runId={activeRunId} onClose={() => togglePanel('activity')} />
+            </div>
+          ),
+        )}
         </div>
-      ) : null}
+      </div>
+      </div>
     </div>
   )
 }

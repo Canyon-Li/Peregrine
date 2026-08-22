@@ -4,7 +4,12 @@ import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import type { AgentEvent } from '../api/types'
-import { ActivityItems, buildActivityEntries, describeActivity } from './RunActivity'
+import {
+  ActivityItems,
+  ActivityTechnicalDetails,
+  buildActivityEntries,
+  describeActivity,
+} from './RunActivity'
 
 function event(partial: Partial<AgentEvent>): AgentEvent {
   return {
@@ -36,7 +41,7 @@ describe('describeActivity', () => {
           tool_call: { id: 'call-1', name: 'read_file', arguments: {} },
         }),
       ),
-    ).toBe('Running read_file')
+    ).toBe('运行 read_file')
     expect(
       describeActivity(
         event({
@@ -52,7 +57,7 @@ describe('describeActivity', () => {
           },
         }),
       ),
-    ).toBe('Completed read_file')
+    ).toBe('完成 read_file')
     expect(
       describeActivity(
         event({
@@ -67,7 +72,7 @@ describe('describeActivity', () => {
           },
         }),
       ),
-    ).toBe('Failed bash')
+    ).toBe('失败 bash')
   })
 
   it('审批 / 完成 / 失败事件', () => {
@@ -78,18 +83,18 @@ describe('describeActivity', () => {
           tool_call: { id: 'c', name: 'run_command', arguments: {} },
         }),
       ),
-    ).toContain('Waiting for approval')
-    expect(describeActivity(event({ type: 'agent_completed' }))).toBe('Finished')
+    ).toContain('等待审批')
+    expect(describeActivity(event({ type: 'agent_completed' }))).toBe('执行完成')
     expect(
       describeActivity(event({ type: 'agent_failed', stop_reason: 'model_error' })),
-    ).toBe('Run failed')
+    ).toBe('执行失败')
   })
 })
 
 describe('ActivityItems', () => {
   it('空状态', () => {
     const html = renderToStaticMarkup(<ActivityItems events={[]} />)
-    expect(html).toContain('No activity yet')
+    expect(html).toContain('暂无活动')
   })
 
   it('把同一个工具的开始与完成事件合成一条记录', () => {
@@ -119,14 +124,23 @@ describe('ActivityItems', () => {
     expect(entries).toHaveLength(1)
     expect(entries[0]).toMatchObject({
       id: 'c1',
-      label: 'Completed read file',
+      label: '已读取文件',
       meta: 'read_file',
       state: 'done',
     })
 
     const html = renderToStaticMarkup(<ActivityItems events={events} />)
-    expect(html.match(/Completed read file/g)).toHaveLength(1)
+    expect(html.match(/已读取文件/g)).toHaveLength(1)
     expect(html).toContain('activity-item--done')
     expect(html).not.toContain('activity-item--active')
+  })
+
+  it('Technical details 默认折叠但保留原始分析证据', () => {
+    const events = [event({ event_id: 'raw-1', provider: 'fake', model: 'test-model' })]
+    const html = renderToStaticMarkup(<ActivityTechnicalDetails events={events} />)
+    expect(html).toContain('<details class="activity-details activity-section">')
+    expect(html).not.toContain('<details class="activity-details activity-section" open="">')
+    expect(html).toContain('技术详情')
+    expect(html).toContain('test-model')
   })
 })
