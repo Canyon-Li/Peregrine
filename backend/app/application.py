@@ -19,6 +19,7 @@ CLI（``app.models.chat``）与 Peregrine Host（``app.server``）共用这一�
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ from app.agent import (
 from app.context import (
     ContextManager,
     ContextSettings,
+    ContextSummaryModelConfig,
     ConversationReducer,
     ModelContextSummarizer,
     SQLiteConversationSummaryStore,
@@ -76,6 +78,10 @@ from app.memory import (
     MemoryReflectionConfig,
     PostRunMemoryReflector,
     register_memory_tools,
+)
+from app.model_settings import (
+    ModelSettingsService,
+    load_effective_model_configuration,
 )
 from app.models.config import ModelSettings
 from app.models.registry import ModelAdapterRegistry
@@ -211,6 +217,7 @@ class Application:
         shared_event_handler: AgentEventHandler | None = None,
         memory_reflection_config: MemoryReflectionConfig | None = None,
         memory_maintenance_config: MemoryMaintenanceConfig | None = None,
+        context_summary_config: ContextSummaryModelConfig | None = None,
         skill_learning_settings: SkillLearningSettings | None = None,
         web_approval: bool = False,
         agent_runtime: AgentRuntime | None = None,
@@ -240,8 +247,26 @@ class Application:
         self.max_tool_rounds = max_tool_rounds
         self.max_output_tokens = max_output_tokens
         self._run_budget_config = run_budget_config
-        self._memory_reflection_config = memory_reflection_config
-        self._memory_maintenance_config = memory_maintenance_config
+        effective_model_configuration = (
+            load_effective_model_configuration()
+            if settings is None and registry is None
+            else None
+        )
+        self._memory_reflection_config = memory_reflection_config or (
+            effective_model_configuration.reflection
+            if effective_model_configuration is not None
+            else None
+        )
+        self._memory_maintenance_config = memory_maintenance_config or (
+            effective_model_configuration.maintenance
+            if effective_model_configuration is not None
+            else None
+        )
+        self._context_summary_config = context_summary_config or (
+            effective_model_configuration.summary
+            if effective_model_configuration is not None
+            else None
+        )
         self._skill_learning_settings = skill_learning_settings
         # True = WebApprovalGate（Host）；False = ConsoleApprovalGate（CLI）。
         self.web_approval = web_approval
@@ -249,7 +274,14 @@ class Application:
         self._agent_runtime = agent_runtime
         # Agent Host 状态（bootstrap 产物；None = 未配置 Agent）。
         self.agent_host_status = agent_host_status
-        self.settings = settings or ModelSettings()
+        self.settings = settings or (
+            effective_model_configuration.settings
+            if effective_model_configuration is not None
+            else ModelSettings()
+        )
+        self.model_settings_service = ModelSettingsService()
+        self.active_model_roles: dict[str, dict[str, object]] = {}
+        self.host_restart_callback: Callable[[], None] | None = None
         if registry is not None:
             # 测试注入的离线 registry：provider 直接取传入值（不校验 .env）。
             self.registry = registry
@@ -446,16 +478,23 @@ class Application:
         memory_maintenance_reflector = MemoryMaintenanceReflector(
             self.registry,
             config=maintenance_config,
-            default_provider=memory_reflector.provider_hint or self.provider,
-            default_model=memory_reflector.model_hint or self.model,
+            default_provider=self.provider,
+            default_model=self.model,
         )
 
         context_settings = ContextSettings()
-        context_summarizer = ModelContextSummarizer(
-            self.registry,
-            provider=self.provider,
-            model=self.model,
-            max_output_tokens=context_settings.context_summary_max_output_tokens,
+        summary_config = self._context_summary_config or ContextSummaryModelConfig()
+        context_summarizer = (
+            ModelContextSummarizer(
+                self.registry,
+                provider=summary_config.provider or self.provider,
+                model=summary_config.model or self.model,
+                max_output_tokens=(
+                    context_settings.context_summary_max_output_tokens
+                ),
+            )
+            if summary_config.enabled
+            else None
         )
 
         # MCP：配置缺失 / 损坏时不阻断启动（CLI 会检查 mcp_error 决定退出码）。
@@ -487,14 +526,18 @@ class Application:
             rule_store=rule_store,
             context_manager=ContextManager(
                 context_settings=context_settings,
-                conversation_reducer=ConversationReducer(
-                    context_summarizer,
-                    keep_recent_conversation_blocks=(
-                        context_settings.context_keep_recent_conversation_blocks
-                    ),
-                    keep_recent_tool_rounds=(
-                        context_settings.context_keep_recent_tool_rounds
-                    ),
+                conversation_reducer=(
+                    ConversationReducer(
+                        context_summarizer,
+                        keep_recent_conversation_blocks=(
+                            context_settings.context_keep_recent_conversation_blocks
+                        ),
+                        keep_recent_tool_rounds=(
+                            context_settings.context_keep_recent_tool_rounds
+                        ),
+                    )
+                    if context_summarizer is not None
+                    else None
                 ),
             ),
             task_context_provider=TaskContextProvider(task_store),
@@ -582,6 +625,28 @@ class Application:
         self.memory_reflection_enabled = reflection_config.enabled
         self.memory_maintenance_enabled = maintenance_config.enabled
         self.context_summarizer = context_summarizer
+        self.active_model_roles = {
+            "main": {
+                "enabled": True,
+                "provider": self.provider,
+                "model": self.model,
+            },
+            "summary": {
+                "enabled": summary_config.enabled,
+                "provider": summary_config.provider or self.provider,
+                "model": summary_config.model or self.model,
+            },
+            "reflection": {
+                "enabled": reflection_config.enabled,
+                "provider": memory_reflector.provider_hint,
+                "model": memory_reflector.model_hint,
+            },
+            "maintenance": {
+                "enabled": maintenance_config.enabled,
+                "provider": memory_maintenance_reflector.provider_hint,
+                "model": memory_maintenance_reflector.model_hint,
+            },
+        }
         self.mcp_manager = mcp_manager
         self.mcp_statuses = mcp_statuses
         self.mcp_error = mcp_error
