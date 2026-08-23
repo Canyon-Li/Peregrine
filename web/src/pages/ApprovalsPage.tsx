@@ -1,6 +1,5 @@
 /** Approvals 页面（UX 样板）：Pending / History 分段，统一 PageShell + toast。
 
-- web 审批显示人类可读动作（如 “Type text”），技术 tool_name 放次要位置。
 - Approve / Deny 用全局 toast 反馈，替代 inline notice。
 - 加载 / 空 / 错误用统一 PageStates。
 */
@@ -14,9 +13,6 @@ import {
   listApprovals,
 } from '../api/approvals'
 import type { ApprovalRequest, ApprovalStatus } from '../api/types'
-import {
-  isWebApproval,
-} from '../approval/agentApproval'
 import { PageShell } from '../components/PageShell'
 import { EmptyState, ErrorState, LoadingState } from '../components/PageStates'
 import { Badge, Button } from '../components/ui'
@@ -50,15 +46,6 @@ const STATUS_LABEL: Record<ApprovalStatus, string> = {
   denied: '已拒绝',
 }
 
-const AGENT_ACTION_LABEL: Record<string, string> = {
-  agent_click: '点击界面元素',
-  agent_type: '输入文字',
-  agent_key: '模拟按键与快捷键',
-  agent_scroll: '滚动当前窗口',
-  agent_open_app: '打开应用',
-  agent_focus: '聚焦窗口',
-}
-
 function ApprovalItem({
   approval,
   busy,
@@ -70,18 +57,11 @@ function ApprovalItem({
   onApprove: (id: string) => void
   onDeny: (id: string) => void
 }): React.JSX.Element {
-  const web = isWebApproval(approval)
-  const title = web
-    ? (AGENT_ACTION_LABEL[approval.tool_name] ?? '操作这台主机')
-    : approval.tool_name
 
   return (
     <div className="approval-card">
       <div className="approval-card__heading">
         <div className="approval-card__icon">
-          <span className="approval-card__icon-label">
-            {web ? '⌘' : '›'}
-          </span>
         </div>
         <div className="approval-card__content">
           <div className="approval-card__title-row">
@@ -95,9 +75,6 @@ function ApprovalItem({
                 <div className="approval-card__reason">{approval.reason}</div>
               ) : null}
               <div className="approval-card__meta">
-                {web ? (
-                  <span className="text-muted">工具：{approval.tool_name}</span>
-                ) : null}
                 {approval.run_id ? (
                   <span className="text-muted">
                     Run：{approval.run_id.slice(0, 8)}

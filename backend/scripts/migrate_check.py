@@ -33,9 +33,7 @@ async def main() -> None:
     r = await store.create(
         run_id=None,
         conversation_id=None,
-        tool_name="agent_type",
         tool_call_id="c1",
-        arguments={"text": "x"},
         ui_scope="web",
     )
     print("created ui_scope:", r.ui_scope)

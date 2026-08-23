@@ -25,35 +25,17 @@ def _parser() -> argparse.ArgumentParser:
         "--mcp-config",
         help="Path to the MCP Server JSON configuration file.",
     )
-    parser.add_argument(
-        "--agent-helper",
-        help="Explicit Swift helper binary path (overrides env/dev auto-detect).",
-    )
-    parser.add_argument(
-        "--disable-agent",
-        action="store_true",
-        help="Disable Agent Runtime even if a helper is available.",
-    )
     return parser
 
 
 def _application_kwargs(args: argparse.Namespace) -> dict[str, object]:
     """按同一份启动参数为每次Host实例构造依赖。"""
 
-    from app.agent import build_host_agent
-
     application_kwargs: dict[str, object] = {}
     if args.database:
         application_kwargs["database"] = args.database
     if args.mcp_config:
         application_kwargs["mcp_config"] = args.mcp_config
-
-    agent_runtime, agent_host_status = build_host_agent(
-        helper_path=args.agent_helper,
-        enabled=False if args.disable_agent else None,
-    )
-    application_kwargs["agent_runtime"] = agent_runtime
-    application_kwargs["agent_host_status"] = agent_host_status
     return application_kwargs
 
 

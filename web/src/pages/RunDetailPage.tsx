@@ -2,12 +2,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { listArtifacts } from '../api/artifacts'
-import { SERVER_URL } from '../api/config'
-import { getLatestAgentObservation } from '../api/agent'
 import { cancelRun, getRun, getRunTrace, recoverRun } from '../api/runs'
 import { buildTurnView, formatDuration, formatTokens, humanizeRunError } from '../agent/turnPresentation'
 import ArtifactList from '../components/ArtifactList'
-import AgentObservationPanel from '../components/AgentObservationPanel'
 import ContextInspector from '../components/ContextInspector'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import ExecutionTrace from '../components/ExecutionTrace'
@@ -32,7 +29,6 @@ export default function RunDetailPage({
   const [confirmCancel, setConfirmCancel] = useState(false)
   const runQuery = useQuery({ queryKey: ['run', runId], queryFn: () => getRun(runId), refetchInterval: 3000 })
   const traceQuery = useQuery({ queryKey: ['run-trace', runId], queryFn: () => getRunTrace(runId), refetchInterval: 3000 })
-  const agentQuery = useQuery({ queryKey: ['agent-observation', runId], queryFn: () => getLatestAgentObservation(runId), retry: false })
   const artifactsQuery = useQuery({ queryKey: ['artifacts', 'run', runId], queryFn: () => listArtifacts({ runId, limit: 100 }) })
   const run = runQuery.data
   const events = traceQuery.data?.events ?? []
@@ -120,18 +116,6 @@ export default function RunDetailPage({
               </section>
 
               <RunArtifactsSection artifacts={artifactsQuery.data ?? []} />
-
-              {agentQuery.data?.observation ? (
-                <section className="run-detail-section">
-                  <AgentObservationPanel
-                    observation={agentQuery.data.observation}
-                    runId={agentQuery.data.run_id}
-                    eventTime={agentQuery.data.event_time}
-                    serverUrl={SERVER_URL}
-                    title="Agent activity"
-                  />
-                </section>
-              ) : null}
 
               <section className="run-detail-section">
                 <div className="section-heading"><div><h2>Trace</h2><p>Complete execution events grouped by model step</p></div></div>

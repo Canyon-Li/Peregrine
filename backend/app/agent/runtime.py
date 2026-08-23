@@ -69,7 +69,6 @@ from .budget import (
     RunBudgetStatus,
     chargeable_tokens,
 )
-from .agent_guard import AgentStagnationGuard
 from .errors import (
     AgentRuntimeError,
     ContextPreparationError,
@@ -380,9 +379,6 @@ class AgentRuntime:
         plan_task_created = False
         plan_task_id: str | None = None
         finalization_pending = False
-        agent_verification_pending = False
-        agent_guard = AgentStagnationGuard()
-        agent_halted = False
         budget_warning_emitted = False
         budget_finalization_attempted = False
         request_prefix_state: _RequestPrefixState | None = None
@@ -588,20 +584,10 @@ class AgentRuntime:
                         *request_messages[historical_message_count:],
                     )
                 if force_final_answer:
-                    if agent_halted:
-                        final_instruction = (
-                            "Agent 操作已因同一失败且界面无进展而停止。不要再输出"
-                            "或伪造任何工具调用；请根据已有证据直接说明阻塞原因、"
-                            "已经完成的部分和用户可采取的恢复步骤。"
-                        )
-                    elif budget_forces_final:
                         final_instruction = _RUN_BUDGET_FINALIZATION_MESSAGE
                     else:
                         final_instruction = (
                             "工具调用轮次已用完。请读取最后一条工具结果，停止"
-                            "调用工具并直接回答用户。对于 verification_status="
-                            "unverified 的工具操作，只能说明事件已投递、效果未"
-                            "确认，不能宣称界面操作已经完成。"
                         )
                     request_messages = (
                         *request_messages,
@@ -925,18 +911,6 @@ class AgentRuntime:
                             step=step,
                         )
                     break
-                if agent_verification_pending and not agent_halted:
-                    messages.append(
-                        Message(
-                            role=MessageRole.SYSTEM,
-                            content=(
-                                "最近一次 agent_type 只确认输入事件已投递，尚未"
-                                "确认界面效果。必须先调用 agent_observe 获取新证据，"
-                                "不能直接向用户宣称操作完成。"
-                            ),
-                        )
-                    )
-                    continue
                 final_message = assistant_message
                 if mode is AgentMode.PLAN:
                     # Plan Mode 完成条件：不仅要 task_create/task_update 成功，
@@ -1072,22 +1046,6 @@ class AgentRuntime:
                         context=execution_context,
                         hook=tool_event_hook,
                     )
-                guard_decision = agent_guard.record(tool_call, result)
-                if guard_decision.feedback:
-                    result = result.model_copy(
-                        update={
-                            "error": "\n".join(
-                                part
-                                for part in (
-                                    result.error,
-                                    guard_decision.feedback,
-                                )
-                                if part
-                            )
-                        }
-                    )
-                if guard_decision.halt:
-                    agent_halted = True
                 if self._checkpoint_store is not None:
                     await self._checkpoint_store.complete_tool(run_id, result)
                 if (
@@ -1108,17 +1066,6 @@ class AgentRuntime:
                 round_records.append(record)
                 tool_calls.append(record)
                 messages.append(self._tool_result_message(result))
-                if tool_call.name == "agent_type" and result.success:
-                    agent_verification_pending = (
-                        _agent_verification_status(result.output)
-                        == "unverified"
-                    )
-                elif (
-                    tool_call.name == "agent_observe"
-                    and result.success
-                    and agent_verification_pending
-                ):
-                    agent_verification_pending = False
                 if tool_call.name == TOOL_SEARCH_NAME and result.success:
                     pending_activations.update(
                         name
@@ -1148,12 +1095,6 @@ class AgentRuntime:
             finalization_pending = (
                 step == self._max_steps
                 and (
-                    agent_halted
-                    or any(
-                        call.name == "agent_observe"
-                        for call in tool_calls_in_message
-                    )
-                    or self._run_budget.evaluate(
                         usage,
                         chargeable_tokens_override=budget_chargeable_tokens,
                         model_calls_override=main_model_calls,
@@ -1865,21 +1806,6 @@ class AgentRuntime:
             default=str,
         )
         return f"{tool_call.name}:{canonical_arguments}"
-
-
-def _agent_verification_status(output: object) -> str | None:
-    """从统一工具输出中读取系统输入的效果验证状态。"""
-
-    if not isinstance(output, str):
-        return None
-    try:
-        payload = json.loads(output)
-    except (TypeError, ValueError):
-        return None
-    if not isinstance(payload, dict):
-        return None
-    status = payload.get("verification_status")
-    return status if isinstance(status, str) else None
 
 
 def _looks_like_textual_tool_call(content: str | None) -> bool:

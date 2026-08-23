@@ -1,7 +1,6 @@
 /**
  * Assistant 正文渲染：react-markdown + remark-gfm + Shiki。
  *  - react-markdown 默认转义原始 HTML（安全渲染），remark-gfm 提供表格 / 任务列表 / 删除线。
- *  - Shiki 使用 TextMate grammar，视觉接近 VS Code；走纯 JS 正则引擎，Web/Vite 无需 WASM。
  *  - 同步渲染 + 客户端异步高亮：SSR / 测试环境代码块回退为纯文本 <pre><code>。
  */
 

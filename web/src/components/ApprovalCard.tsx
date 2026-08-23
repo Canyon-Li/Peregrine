@@ -2,11 +2,6 @@
 
 import type { ReactElement } from 'react'
 import type { ApprovalRequest } from '../api/types'
-import {
-  agentActionDescription,
-  agentActionLabel,
-  isWebApproval,
-} from '../approval/agentApproval'
 import { Icon } from './Icon'
 import { Button } from './ui'
 

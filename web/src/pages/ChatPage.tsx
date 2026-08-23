@@ -16,7 +16,6 @@ import { getTask, listTasks, planAccept, planReject } from '../api/tasks'
 import type { AgentMode, Message, Task } from '../api/types'
 import { latestRunId } from '../agent/runAnalysis'
 import { buildTurnView } from '../agent/turnPresentation'
-import { chatShouldShowApproval } from '../approval/agentApproval'
 import ApprovalCard from '../components/ApprovalCard'
 import ChatEmptyState from '../components/ChatEmptyState'
 import RunStatusBar from '../components/RunStatusBar'
@@ -172,7 +171,6 @@ export default function ChatPage({
       if (status) map[conv] = status
       const turn = buildTurnView(events, { now: Date.now() })
       if (turn.currentAction) activity[conv] = turn.currentAction
-      else if (turn.targetApp) activity[conv] = turn.targetApp
     }
     return { conversationStatus: map, conversationActivity: activity }
   }, [eventsByRun, runStatuses])
@@ -183,10 +181,8 @@ export default function ChatPage({
     refetchInterval: 2000,
     enabled: activeRunId !== null,
   })
-  // Chat 只负责对话内审批；面板审批始终归独立页面。
   const pendingApproval =
     approvalsQuery.data?.find(
-      (approval) => chatShouldShowApproval(approval, activeRunId),
     ) ?? null
 
   const artifactsQuery = useQuery({
@@ -543,7 +539,6 @@ export default function ChatPage({
           <div className="message-thread">
             {selectedId === null ? (
               <section className="no-conversation">
-                <div className="chat-empty__mark">V</div>
                 <h1>Start new work</h1>
                 <p>Create a conversation, then give Peregrine something to work on.</p>
                 <button

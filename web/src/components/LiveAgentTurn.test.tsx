@@ -44,7 +44,6 @@ describe('LiveAgentTurn', () => {
         events={[
           event({
             type: 'tool_started',
-            tool_call: { id: 't1', name: 'agent_observe', arguments: {} },
           }),
         ]}
         streamText="正在生成 **报告**"
@@ -87,14 +86,11 @@ describe('LiveAgentTurn', () => {
         events={[
           event({
             type: 'tool_started',
-            tool_call: { id: 't1', name: 'agent_type', arguments: { text: '测试' } },
           }),
           event({
             type: 'tool_completed',
-            tool_call: { id: 't1', name: 'agent_type', arguments: {} },
             tool_result: {
               tool_call_id: 't1',
-              tool_name: 'agent_type',
               success: true,
               output: 'ok',
               error: null,

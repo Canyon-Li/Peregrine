@@ -1,4 +1,3 @@
-/** 共享 RpcClient 单例 + 便捷 typed methods / notification 类型。 */
 
 import { WS_URL } from '../api/config'
 import { RpcClient } from './client'
@@ -11,8 +10,3 @@ export const rpcClient = new RpcClient({
 export * from './client'
 export * from './errors'
 export * from './protocol'
-export type {
-  AgentEventNotificationParams,
-  ApprovalNotificationParams,
-  RunStatusNotificationParams,
-} from './notifications'

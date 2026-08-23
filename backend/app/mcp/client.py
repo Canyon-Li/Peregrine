@@ -34,7 +34,6 @@ class MCPClientProtocol(Protocol):
 class StdioMCPClient:
     """维护一个 MCP stdio 子进程及其 ClientSession。"""
 
-    def __init__(self, config: MCPServerConfig) -> None:
         self.config = config
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
@@ -52,8 +51,6 @@ class StdioMCPClient:
                         StdioServerParameters(
                             command=self.config.command,
                             args=list(self.config.args),
-                            env=_resolve_environment(self.config),
-                            cwd=self.config.cwd,
                         )
                     )
                 )
@@ -150,10 +147,7 @@ async def _close_quietly(stack: AsyncExitStack) -> None:
         pass
 
 
-def _resolve_environment(config: MCPServerConfig) -> dict[str, str] | None:
-    """解析配置中的环境变量引用，避免把密钥直接写入 JSON。"""
 
-    resolved: dict[str, str] = {}
     for key, value in config.env.items():
         match = _ENV_REFERENCE.fullmatch(value)
         if match is None:
@@ -165,7 +159,6 @@ def _resolve_environment(config: MCPServerConfig) -> dict[str, str] | None:
                 f"MCP Server '{config.name}' 缺少环境变量 {variable}"
             )
         resolved[key] = os.environ[variable]
-    return resolved or None
 
 
 __all__ = ["MCPClientProtocol", "StdioMCPClient", "serialize_mcp_result"]

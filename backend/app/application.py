@@ -42,14 +42,6 @@ from app.automation import (
     register_automation_tools,
 )
 from app.checkpoint import SQLiteCheckpointStore
-from app.agent import (
-    AgentHostStatus,
-    AgentLeaseHook,
-    AgentLeaseManager,
-    AgentRuntime,
-    AgentSessionManager,
-    register_agent_tools,
-)
 from app.context import (
     ContextManager,
     ContextSettings,
@@ -142,7 +134,6 @@ DEFAULT_SYSTEM_PROMPT = (
     "如果生成了用户需要保留、下载或查看的文件（如报告、CSV、代码、图片），"
     "在最终回答前调用 artifact_publish 发布它；如果最终交付的是结果链接，"
     "也用 artifact_publish 发布。普通中间文件、临时文件、Trace、"
-    "屏幕截图工具 不要发布为 Artifact；没有实际交付物时不要调用"
     "artifact_publish。"
 )
 
@@ -220,8 +211,6 @@ class Application:
         context_summary_config: ContextSummaryModelConfig | None = None,
         skill_learning_settings: SkillLearningSettings | None = None,
         web_approval: bool = False,
-        agent_runtime: AgentRuntime | None = None,
-        agent_host_status: AgentHostStatus | None = None,
         workspace_root: str | Path | None = None,
     ) -> None:
         self.database = Path(database).expanduser().resolve()
@@ -270,10 +259,6 @@ class Application:
         self._skill_learning_settings = skill_learning_settings
         # True = WebApprovalGate（Host）；False = ConsoleApprovalGate（CLI）。
         self.web_approval = web_approval
-        # Agent Runtime 由入口注入；None 时不注册 agent_* 工具。
-        self._agent_runtime = agent_runtime
-        # Agent Host 状态（bootstrap 产物；None = 未配置 Agent）。
-        self.agent_host_status = agent_host_status
         self.settings = settings or (
             effective_model_configuration.settings
             if effective_model_configuration is not None
@@ -317,9 +302,6 @@ class Application:
         self.web_approval_gate: WebApprovalGate | None = None
         self.artifact_store: SQLiteArtifactStore | None = None
         self.artifact_service: ArtifactService | None = None
-        self.agent_runtime: AgentRuntime | None = None
-        self.agent_lease: AgentLeaseManager | None = None
-        self.agent_session: AgentSessionManager | None = None
         self.tool_registry: ToolRegistry | None = None
         self.task_store: FileTaskStore | None = None
         self.memory_manager: MemoryManager | None = None
@@ -428,41 +410,6 @@ class Application:
             default_model=self.model,
         )
 
-        # Agent Runtime 可注入真实实现或测试 Fake；未注入则不注册，
-        # 普通 CLI / Host 现有功能完全不受影响。
-        agent_lease: AgentLeaseManager | None = None
-        agent_session: AgentSessionManager | None = None
-        agent_hooks = ()
-        if self._agent_runtime is not None:
-            agent_session = AgentSessionManager()
-            set_session_manager = getattr(
-                self._agent_runtime, "set_session_manager", None
-            )
-            if callable(set_session_manager):
-                set_session_manager(agent_session)
-            begin_session = getattr(
-                self._agent_runtime, "begin_session_rpc", None
-            )
-            agent_lease = AgentLeaseManager(
-                database.parent / "agent" / "machine.lock"
-            )
-            agent_hooks = (
-                AgentLeaseHook(
-                    agent_lease,
-                    agent_session,
-                    session_starter=(
-                        begin_session if callable(begin_session) else None
-                    ),
-                ),
-            )
-            register_agent_tools(tool_registry, self._agent_runtime)
-            self.agent_runtime = self._agent_runtime
-            # 真实 HostAgentRuntime 才有显式 start / close；
-            # FakeAgentRuntime 没有 start，用 getattr 探测，不影响现有路径。
-            start_runtime = getattr(self._agent_runtime, "start", None)
-            if callable(start_runtime):
-                await start_runtime()
-
         _mark_deferred_tools(tool_registry, _DEFERRED_TOOL_NAMES)
 
         reflection_config = self._memory_reflection_config or MemoryReflectionConfig()
@@ -547,27 +494,16 @@ class Application:
             memory_maintenance_reflector=memory_maintenance_reflector,
             skill_store=skill_store,
             skill_context_provider=skill_context_provider,
-            tool_hooks=agent_hooks,
             post_run_submit=self.post_run_processor.submit,
             run_budget_config=self._run_budget_config,
         )
 
         run_store = SQLiteRunStore(database)
-        # Run 终态 finalizer 顺序：先 end AgentSession（清 target/snapshot + 通知
-        # helper 清 Native 状态），再 release Machine Lease。
-        agent_finalizers: list[object] = []
-        if agent_session is not None:
-            end_session = getattr(self._agent_runtime, "end_session", None)
-            if callable(end_session):
-                agent_finalizers.append(end_session)
-        if agent_lease is not None:
-            agent_finalizers.append(agent_lease.release)
         run_manager = RunManager(
             run_store,
             checkpoint_store,
             runtime,
             approval_store=approval_store,
-            run_finalizers=tuple(agent_finalizers),
         )
         # 启动 reconciliation（Run + Checkpoint 统一处理）。
         reconciled_runs = await run_manager.initialize()
@@ -650,8 +586,6 @@ class Application:
         self.mcp_manager = mcp_manager
         self.mcp_statuses = mcp_statuses
         self.mcp_error = mcp_error
-        self.agent_lease = agent_lease
-        self.agent_session = agent_session
         self.runtime = runtime
         self.run_store = run_store
         self.run_manager = run_manager
@@ -663,7 +597,6 @@ class Application:
         self._started = True
 
     async def close(self) -> None:
-        """优雅关闭 Post-Run / Scheduler / MCP / Agent / 模型适配器（幂等）。"""
 
         if not self._started:
             return
@@ -674,14 +607,5 @@ class Application:
             await self.automation_scheduler.shutdown()
         if self.mcp_manager is not None and self.tool_registry is not None:
             await self.mcp_manager.close(self.tool_registry)
-        if self.agent_lease is not None:
-            self.agent_lease.close()
-        if self.agent_session is not None:
-            self.agent_session.close()
-        if self.agent_runtime is not None:
-            # 只在确实注入真实 HostAgentRuntime（有 close）时关闭 helper。
-            close_runtime = getattr(self.agent_runtime, "close", None)
-            if callable(close_runtime):
-                await close_runtime()
         await self.registry.close()
         self._started = False

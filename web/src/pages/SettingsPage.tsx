@@ -1,16 +1,12 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 
-import { getAgentStatus, requestAgentPermission } from '../api/agent'
 import { getSystemInfo } from '../api/system'
-import AgentStatusView from '../components/AgentStatusView'
 import ExtensionsSettings from '../components/ExtensionsSettings'
 import ModelSettingsPanel from '../components/ModelSettingsPanel'
 import { ErrorState } from '../components/PageStates'
 import { PageShell } from '../components/PageShell'
 
 export default function SettingsPage(): React.JSX.Element {
-  const queryClient = useQueryClient()
   const [section, setSection] = useState<'general' | 'models' | 'extensions'>('general')
 
   const infoQuery = useQuery({
@@ -19,26 +15,6 @@ export default function SettingsPage(): React.JSX.Element {
     refetchInterval: 5000,
     retry: false,
   })
-
-  const agentQuery = useQuery({
-    queryKey: ['agent-status'],
-    queryFn: () => getAgentStatus(),
-    refetchInterval: 5000,
-    retry: false,
-  })
-
-  const web = window.peregrine
-
-  const doRequestPermission = async (
-    permission: 'automation' | 'screen_access',
-  ): Promise<void> => {
-    try {
-      await requestAgentPermission(permission)
-      void queryClient.invalidateQueries({ queryKey: ['agent-status'] })
-    } catch (err) {
-      console.warn('agent permission request failed', err)
-    }
-  }
 
   return (
     <PageShell
@@ -92,30 +68,9 @@ export default function SettingsPage(): React.JSX.Element {
 
               <section className="settings-group">
                 <header className="settings-group__header">
-                  <div><h3>权限</h3><p>本地运行环境与文件访问</p></div>
-                </header>
-                <AgentStatusView
-                  status={agentQuery.data ?? null}
-                  loading={agentQuery.isLoading}
-                  onRequestPermission={(p) => void doRequestPermission(p)}
-                />
-                {(agentQuery.data?.permissions.automation === 'required' ||
-                  agentQuery.data?.permissions.screen_access === 'required') && (
-                  <div className="settings-section__hint">
-                    请求后若状态没有立即变化，请前往“系统权限设置”手动开启。
-                  </div>
-                )}
-              </section>
-
-              <section className="settings-group">
-                <header className="settings-group__header">
-                  <div><h3>界面客户端</h3><p>当前应用与运行环境版本</p></div>
                 </header>
                 <dl className="settings-info-list">
                   <InfoRow label="应用版本" value="0.1.0" />
-                  <InfoRow label="平台" value={web?.platform ?? 'web'} />
-                  <InfoRow label="Web" value={web?.versions.web ?? '—'} />
-                  <InfoRow label="Chrome / Node" value={`${web?.versions.chrome ?? '—'} / ${web?.versions.node ?? '—'}`} />
                 </dl>
               </section>
             </div>

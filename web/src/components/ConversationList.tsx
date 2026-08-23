@@ -100,7 +100,6 @@ export default function ConversationList({
   // 第一个未置顶会话的索引（用于置顶/未置顶分界线）。
   const firstUnpinnedIndex = ordered.findIndex((c) => !pinned.includes(c.id))
 
-  // 内联重命名状态（Web 不实现 window.prompt，改用输入框）。
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingValue, setEditingValue] = useState('')
 
@@ -118,7 +117,6 @@ export default function ConversationList({
   }
 
   const runDelete = (id: string): void => {
-    // Web 不实现 window.confirm，直接执行删除（可恢复为新建）。
     void onDelete?.(id)
     setMenuFor(null)
   }

@@ -283,8 +283,6 @@ export interface ApprovalRequest {
   tool_call_id: string
   arguments: Record<string, unknown>
   reason: string
-  /** 声明式审批落点：chat（审批进 Chat）。 */
-  ui_scope?: 'web' | 'chat'
   status: ApprovalStatus
   created_at: string
   resolved_at: string | null

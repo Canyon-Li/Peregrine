@@ -3,16 +3,13 @@ import { useEffect, useState } from 'react'
 
 import { listApprovals } from './api/approvals'
 import { listArtifacts } from './api/artifacts'
-import { getAgentStatus } from './api/agent'
 import { useEventsStore } from './stores/events'
-import { createWebNotificationController } from './notifications/web'
 import Sidebar from './components/Sidebar'
 import { ToastViewport } from './components/ToastViewport'
 import ApprovalsPage from './pages/ApprovalsPage'
 import ArtifactsPage from './pages/ArtifactsPage'
 import AutomationsPage from './pages/AutomationsPage'
 import ChatPage from './pages/ChatPage'
-import AgentPage from './pages/AgentPage'
 import MemoryPage from './pages/MemoryPage'
 import RunDetailPage from './pages/RunDetailPage'
 import RunsPage from './pages/RunsPage'
@@ -24,7 +21,6 @@ export type PageKey =
   | 'automations'
   | 'approvals'
   | 'artifacts'
-  | 'agent'
   | 'memory'
   | 'settings'
 
@@ -55,12 +51,6 @@ export default function App(): React.JSX.Element {
     if (connected) setEverConnected(true)
   }, [connected])
 
-  useEffect(() => {
-    const controller = createWebNotificationController()
-    controller?.start()
-    return () => controller?.stop()
-  }, [])
-
   const pendingApprovalsQuery = useQuery({
     queryKey: ['sidebar-approvals'],
     queryFn: () => listApprovals('pending'),
@@ -74,13 +64,6 @@ export default function App(): React.JSX.Element {
     refetchInterval: 6000,
   })
   const hasArtifacts = (artifactsIndicatorQuery.data?.length ?? 0) > 0
-  const agentIndicatorQuery = useQuery({
-    queryKey: ['agent-status'],
-    queryFn: getAgentStatus,
-    refetchInterval: 3000,
-    retry: false,
-  })
-  const agentActive = Boolean(agentIndicatorQuery.data?.lease?.busy)
 
   // 实时 running run 数（来自 run.status 事件）+ pending 审批数 → 侧栏徽标。
   const runningCount = Object.values(runStatuses).filter(
@@ -117,7 +100,6 @@ export default function App(): React.JSX.Element {
         dots={{
           chat: runningCount > 0,
           artifacts: hasArtifacts,
-          agent: agentActive,
         }}
       />
       <div className="main">
@@ -148,7 +130,6 @@ export default function App(): React.JSX.Element {
         {page === 'automations' && <AutomationsPage />}
         {page === 'approvals' && <ApprovalsPage />}
         {page === 'artifacts' && <ArtifactsPage />}
-        {page === 'agent' && <AgentPage />}
         {page === 'memory' && <MemoryPage />}
         {page === 'settings' && <SettingsPage />}
       </div>

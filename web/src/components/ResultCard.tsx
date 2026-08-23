@@ -25,10 +25,6 @@ export default function ResultCard({ artifact }: ResultCardProps): ReactElement 
 
   const openUrl = (): void => {
     if (!artifact.source_url) return
-    if (window.peregrine) {
-      void window.peregrine.openExternal(artifact.source_url)
-      return
-    }
     window.open(artifact.source_url, '_blank', 'noopener,noreferrer')
   }
 

@@ -6,7 +6,6 @@
 */
 
 import type { AgentEvent, ModelUsage } from '../api/types'
-import type { AgentObservation } from '../api/agent'
 
 export type ToolState = 'active' | 'done' | 'failed' | 'waiting'
 
@@ -22,8 +21,6 @@ export interface ToolStepVM {
   durationMs?: number
   errorCode?: string | null
   approval?: 'pending' | 'approved' | 'denied'
-  verification?: 'unverified' | 'verified'
-  isAgent: boolean
 }
 
 export interface UsageVM {
@@ -46,25 +43,13 @@ export interface TurnView {
     | 'thinking'
     | 'working'
     | 'waiting_approval'
-    | 'verifying'
     | 'completed'
     | 'failed'
     | 'cancelled'
     | 'interrupted'
   finalText: string
   currentAction: string | null
-  targetApp: string | null
-  capability: 'Agent' | 'Files' | 'Web' | 'Memory' | 'Task' | 'Artifact' | null
   error: { title: string; message: string; technical: string | null } | null
-}
-
-export interface AgentContextVM {
-  target: string | null
-  window: string | null
-  lastAction: string | null
-  verification: '已验证' | '等待验证' | null
-  executionMode: string | null
-  recentActions: ToolStepVM[]
 }
 
 /** 从 ToolCall arguments 里取可读参数（可能为对象或 JSON 字符串）。 */
@@ -84,45 +69,9 @@ function argValue(args: unknown, key: string): string | null {
   return null
 }
 
-function formatKeyShortcut(args: unknown): string {
-  const key = argValue(args, 'key') ?? argValue(args, 'keycode')
-  if (!key) return 'a key'
-  const rawMods =
-    typeof args === 'object' && args !== null
-      ? (args as Record<string, unknown>).modifiers
-      : null
-  const mods = Array.isArray(rawMods)
-    ? rawMods.filter((item): item is string => typeof item === 'string')
-    : (argValue(args, 'modifiers')?.split(',') ?? [])
-  const symbols: Record<string, string> = {
-    command: '⌘', cmd: '⌘', shift: '⇧', option: '⌥', alt: '⌥', control: '⌃', ctrl: '⌃',
-  }
-  const parts = mods.map((m) => symbols[m.trim()] ?? m.trim()).filter(Boolean)
-  const prettyKey = key.length === 1 ? key.toUpperCase() : key.replace(/^(?:key|Key)/, '')
-  return [...parts, prettyKey].join(' ')
-}
-
-const AGENT_TOOLS = new Set([
-  'agent_click', 'agent_type', 'agent_key', 'agent_scroll',
-  'agent_open_app', 'agent_focus', 'agent_observe',
-])
-
 /** 人类可读动作标签（进行态 / 完成态）。未知工具走 fallback。 */
 export function toolActiveLabel(name: string, args: unknown): string {
   switch (name) {
-    case 'agent_open_app': {
-      const app = argValue(args, 'app')
-      return app ? `打开 ${app}` : '打开应用'
-    }
-    case 'agent_observe': return '读取屏幕'
-    case 'agent_type': {
-      const text = argValue(args, 'text')
-      return text ? `输入 “${text.slice(0, 40)}”` : '输入文本'
-    }
-    case 'agent_click': return '点击界面元素'
-    case 'agent_key': return `按键 ${formatKeyShortcut(args)}`
-    case 'agent_scroll': return '滚动窗口'
-    case 'agent_focus': return '聚焦目标'
     case 'read_file': {
       const path = argValue(args, 'path')
       return path ? `读取 ${path}` : '读取文件'
@@ -149,13 +98,8 @@ export function toolActiveLabel(name: string, args: unknown): string {
   }
 }
 
-export function toolDoneLabel(name: string, args: unknown, ok: boolean): string {
   if (!ok) {
     switch (name) {
-      case 'agent_click': return '点击失败'
-      case 'agent_type': return '输入失败'
-      case 'agent_key': return '按键失败'
-      case 'agent_observe': return '读取屏幕失败'
       case 'read_file': return '无法读取文件'
       case 'write_file': return '无法写入文件'
       case 'run_shell_command': return '命令失败'
@@ -163,19 +107,6 @@ export function toolDoneLabel(name: string, args: unknown, ok: boolean): string 
     }
   }
   switch (name) {
-    case 'agent_open_app': {
-      const app = argValue(args, 'app')
-      return app ? `已打开 ${app}` : '已打开应用'
-    }
-    case 'agent_observe': return '已检查目标'
-    case 'agent_type': {
-      const text = argValue(args, 'text')
-      return text ? `已输入 “${text.slice(0, 40)}”` : '已输入文本'
-    }
-    case 'agent_click': return '已点击元素'
-    case 'agent_key': return `已按键 ${formatKeyShortcut(args)}`
-    case 'agent_scroll': return '已滚动'
-    case 'agent_focus': return '已聚焦窗口'
     case 'read_file': return '已读取文件'
     case 'write_file': return '已写入文件'
     case 'list_files': return '已查看文件'
@@ -207,35 +138,7 @@ function detailsText(args: unknown): string {
   }
 }
 
-function parseObject(value: string | null): Record<string, unknown> | null {
-  if (!value) return null
-  try {
-    const parsed = JSON.parse(value)
-    return typeof parsed === 'object' && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null
-  } catch {
-    return null
-  }
-}
-
-function targetFromOutput(output: string | null): string | null {
-  const parsed = parseObject(output)
-  if (!parsed) return null
-  const direct = parsed.app
-  if (typeof direct === 'string' && direct) return direct
-  for (const key of ['target', 'active_app']) {
-    const app = parsed[key]
-    if (typeof app === 'object' && app !== null) {
-      const name = (app as Record<string, unknown>).name
-      if (typeof name === 'string' && name) return name
-    }
-  }
-  return null
-}
-
 function capabilityForTool(name: string): TurnView['capability'] {
-  if (AGENT_TOOLS.has(name)) return 'Agent'
   if (name.includes('artifact')) return 'Artifact'
   if (name.startsWith('memory_')) return 'Memory'
   if (name.startsWith('task_')) return 'Task'
@@ -265,29 +168,18 @@ export function humanizeRunError(
   }
 }
 
-/** 从 agent 工具输出里解析验证状态（纯展示，不依赖后端字段）。 */
-export function parseVerificationStatus(output: string | null): 'verified' | 'unverified' | null {
-  if (!output) return null
-  const status = /"verification_status"\s*:\s*"(verified|unverified)"/.exec(output)
-  if (status) return status[1] as 'verified' | 'unverified'
-  if (/frontmost_verified"\s*:\s*true/.test(output)) return 'verified'
-  return null
-}
-
 export function buildTurnView(
   events: AgentEvent[],
   opts: { now?: number } = {},
 ): TurnView {
   const tools: ToolStepVM[] = []
   const toolIndexes = new Map<string, number>()
-  let lastUnverifiedAgent: number | null = null
   let steps = 0
   const usageParts: ModelUsage[] = []
   let finalUsage: ModelUsage | null = null
   let startedAt: number | null = null
   let endedAt: number | null = null
   let finalText = ''
-  let targetApp: string | null = null
   let capability: TurnView['capability'] = null
   let stopReason: string | null = null
   let rawError: string | null = null
@@ -298,7 +190,6 @@ export function buildTurnView(
     name: string,
     args: unknown,
     state: ToolState,
-    isAgent: boolean,
   ): number => {
     const existing = toolIndexes.get(id)
     if (existing === undefined) {
@@ -309,7 +200,6 @@ export function buildTurnView(
         label: toolActiveLabel(name, args),
         state,
         details: detailsText(args),
-        isAgent,
       })
       return tools.length - 1
     }
@@ -345,21 +235,14 @@ export function buildTurnView(
       case 'tool_started': {
         if (event.tool_call) {
           const name = event.tool_call.name
-          const isAgent = AGENT_TOOLS.has(name)
           capability = capabilityForTool(name) ?? capability
-          if (name === 'agent_open_app') {
-            targetApp = argValue(event.tool_call.arguments, 'app') ?? targetApp
-          }
           const idx = upsertTool(
             event.tool_call.id,
             name,
             event.tool_call.arguments,
             'active',
-            isAgent,
           )
           tools[idx].label = toolActiveLabel(name, event.tool_call.arguments)
-          // 新工具操作开始时重置验证传播；observe 是验证动作，不重置。
-          if (isAgent && name !== 'agent_observe') lastUnverifiedAgent = null
         }
         break
       }
@@ -370,7 +253,6 @@ export function buildTurnView(
             event.tool_call.name,
             event.tool_call.arguments,
             'waiting',
-            AGENT_TOOLS.has(event.tool_call.name),
           )
           tools[idx].approval = 'pending'
           tools[idx].state = 'waiting'
@@ -385,7 +267,6 @@ export function buildTurnView(
             tools[idx].approval = decision
             // 批准后回到执行态；拒绝则终止。
             tools[idx].state = decision === 'approved' ? 'active' : 'failed'
-            if (decision === 'approved') lastUnverifiedAgent = null
           }
         }
         break
@@ -402,25 +283,6 @@ export function buildTurnView(
             tools[idx].durationMs = event.tool_result.duration_ms
             tools[idx].resultDetails = event.tool_result.output ?? undefined
             tools[idx].errorCode = event.tool_result.error
-            targetApp = targetFromOutput(event.tool_result.output) ?? targetApp
-            if (AGENT_TOOLS.has(name)) {
-              const verification = parseVerificationStatus(event.tool_result.output)
-              if (verification === 'unverified') {
-                tools[idx].verification = 'unverified'
-                lastUnverifiedAgent = idx
-              } else if (verification === 'verified') {
-                tools[idx].verification = 'verified'
-                if (lastUnverifiedAgent === idx) lastUnverifiedAgent = null
-              }
-            }
-            // observe 验证通过 → 把最近未验证的工具操作标为已验证。
-            if (name === 'agent_observe' && ok && lastUnverifiedAgent !== null) {
-              const verification = parseVerificationStatus(event.tool_result.output)
-              if (verification === 'verified' && tools[lastUnverifiedAgent]) {
-                tools[lastUnverifiedAgent].verification = 'verified'
-                lastUnverifiedAgent = null
-              }
-            }
           }
         }
         break
@@ -487,9 +349,6 @@ export function buildTurnView(
   const hasPendingApproval = tools.some(
     (tool) => tool.approval === 'pending' && tool.state === 'waiting',
   )
-  const hasUnverified = tools.some(
-    (tool) => tool.verification === 'unverified',
-  )
   const hasActiveTool = tools.some((tool) => tool.state === 'active')
   const status: TurnView['status'] = events.some((e) => e.type === 'agent_failed')
     ? stopReason === 'interrupted' ? 'interrupted' : 'failed'
@@ -499,11 +358,6 @@ export function buildTurnView(
         ? 'completed'
         : hasPendingApproval
           ? 'waiting_approval'
-          : hasUnverified
-            ? 'verifying'
-            : hasActiveTool
-              ? 'working'
-              : 'thinking'
 
   const currentTool = [...tools].reverse().find(
     (tool) => tool.state === 'active' || tool.state === 'waiting',
@@ -518,7 +372,6 @@ export function buildTurnView(
     status,
     finalText,
     currentAction: currentTool?.label ?? null,
-    targetApp,
     capability,
     error:
       status === 'failed' || status === 'interrupted'
@@ -547,32 +400,6 @@ export function formatCacheHitRate(rate: number | null): string {
   if (rate === null) return '暂无'
   const rounded = Math.round(rate * 10) / 10
   return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)}%`
-}
-
-export function buildAgentContext(
-  events: AgentEvent[],
-  observation: AgentObservation | null,
-): AgentContextVM {
-  const view = buildTurnView(events)
-  const agentActions = view.tools.filter((tool) => tool.isAgent)
-  const last = agentActions.at(-1)
-  const parsed = parseObject(last?.resultDetails ?? null)
-  const mode = parsed?.execution_mode
-  return {
-    target:
-      observation?.target?.name
-      ?? observation?.active_app?.name
-      ?? view.targetApp,
-    window: observation?.active_window?.title || null,
-    lastAction: last?.label ?? null,
-    verification: last?.verification === 'verified'
-      ? '已验证'
-      : last?.verification === 'unverified'
-        ? '等待验证'
-        : null,
-    executionMode: typeof mode === 'string' ? mode.replaceAll('_', ' ') : null,
-    recentActions: agentActions.slice(-6),
-  }
 }
 
 /** token 显示：980 → “980”，1234 → “1.2k”，18400 → “18.4k”。 */

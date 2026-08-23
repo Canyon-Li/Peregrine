@@ -32,7 +32,6 @@ const STOP_REASON_LABEL: Record<string, string> = {
   max_steps: '已达到最大执行步数',
   model_error: '模型调用失败',
   repeated_tool_call: '重复调用了相同工具',
-  stale_observation: '系统画面状态已经变化',
   permission_denied: '操作未获得批准',
   context_error: '上下文超过可用窗口',
   cancelled: '已由用户取消',
@@ -78,11 +77,6 @@ export default function RunStatusBar({
 }): ReactElement {
   const turnLabel = turnState === 'waiting_approval'
     ? { label: '等待确认', tone: 'waiting' }
-    : turnState === 'verifying'
-      ? { label: '正在验证', tone: 'waiting' }
-      : turnState === 'thinking'
-        ? { label: '正在分析', tone: 'working' }
-        : undefined
   const status = turnLabel ?? (runStatus ? STATUS_LABEL[runStatus] : undefined)
   const running = runStatus === 'running'
   const stopped = runStatus === 'failed' || runStatus === 'interrupted'

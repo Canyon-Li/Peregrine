@@ -19,7 +19,6 @@ export const SIDEBAR_ITEMS: SidebarItem[] = [
   { key: 'approvals', label: '审批', icon: 'approvals' },
   { key: 'memory', label: '长期记忆', icon: 'memory' },
   { key: 'artifacts', label: '交付物', icon: 'artifacts' },
-  { key: 'agent', label: '系统', icon: 'agent' },
 ]
 
 export interface SidebarProps {

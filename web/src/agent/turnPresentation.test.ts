@@ -4,12 +4,10 @@ import { describe, expect, it } from 'vitest'
 
 import type { AgentEvent } from '../api/types'
 import {
-  buildAgentContext,
   buildTurnView,
   formatDuration,
   formatTokens,
   humanizeToolName,
-  parseVerificationStatus,
   toolActiveLabel,
   toolDoneLabel,
 } from './turnPresentation'
@@ -48,33 +46,25 @@ describe('buildTurnView: tool timeline', () => {
       event({ type: 'agent_started', event_time: '2026-08-21T00:00:00.000Z' }),
       event({
         type: 'tool_started',
-        tool_call: toolCall('t1', 'agent_type', { text: '测试' }),
       }),
       event({
         type: 'tool_completed',
-        tool_call: { id: 't1', name: 'agent_type', arguments: {} },
-        tool_result: { tool_call_id: 't1', tool_name: 'agent_type', success: true, output: 'ok', error: null, duration_ms: 10 },
       }),
       event({ type: 'agent_completed', event_time: '2026-08-21T00:00:10.000Z' }),
     ])
     expect(view.tools).toHaveLength(1)
     expect(view.tools[0].state).toBe('done')
-    expect(view.tools[0].label).toBe('已输入 “测试”')
     expect(view.toolCount).toBe(1)
     expect(view.durationMs).toBe(10_000)
   })
 
   it('tool 失败标记 failed', () => {
     const view = buildTurnView([
-      event({ type: 'tool_started', tool_call: toolCall('t1', 'agent_click', {}) }),
       event({
         type: 'tool_completed',
-        tool_call: { id: 't1', name: 'agent_click', arguments: {} },
-        tool_result: { tool_call_id: 't1', tool_name: 'agent_click', success: false, output: null, error: 'x', duration_ms: 5 },
       }),
     ])
     expect(view.tools[0].state).toBe('failed')
-    expect(view.tools[0].label).toBe('点击失败')
   })
 
   it('toolCount 按 tool_call_id 去重', () => {
@@ -109,68 +99,13 @@ describe('buildTurnView: approval', () => {
 
   it('denied 后状态 failed', () => {
     const view = buildTurnView([
-      event({ type: 'tool_approval_required', tool_call: toolCall('t1', 'agent_type', {}) }),
       event({
         type: 'tool_approval_completed',
-        tool_call: toolCall('t1', 'agent_type', {}),
         approval_decision: 'denied',
       }),
     ])
     expect(view.tools[0].approval).toBe('denied')
     expect(view.tools[0].state).toBe('failed')
-  })
-})
-
-describe('buildTurnView: verification', () => {
-  it('unverified agent 操作标记 unverified', () => {
-    const view = buildTurnView([
-      event({ type: 'tool_started', tool_call: toolCall('t1', 'agent_click', {}) }),
-      event({
-        type: 'tool_completed',
-        tool_call: { id: 't1', name: 'agent_click', arguments: {} },
-        tool_result: {
-          tool_call_id: 't1',
-          tool_name: 'agent_click',
-          success: true,
-          output: '{"delivery_status":"sent","verification_status":"unverified"}',
-          error: null,
-          duration_ms: 1,
-        },
-      }),
-    ])
-    expect(view.tools[0].verification).toBe('unverified')
-  })
-
-  it('observe 验证后把最近 unverified 操作标为 verified', () => {
-    const view = buildTurnView([
-      event({ type: 'tool_started', tool_call: toolCall('t1', 'agent_click', {}) }),
-      event({
-        type: 'tool_completed',
-        tool_call: { id: 't1', name: 'agent_click', arguments: {} },
-        tool_result: {
-          tool_call_id: 't1',
-          tool_name: 'agent_click',
-          success: true,
-          output: '{"verification_status":"unverified"}',
-          error: null,
-          duration_ms: 1,
-        },
-      }),
-      event({ type: 'tool_started', tool_call: toolCall('t2', 'agent_observe', {}) }),
-      event({
-        type: 'tool_completed',
-        tool_call: { id: 't2', name: 'agent_observe', arguments: {} },
-        tool_result: {
-          tool_call_id: 't2',
-          tool_name: 'agent_observe',
-          success: true,
-          output: '{"frontmost_verified":true}',
-          error: null,
-          duration_ms: 1,
-        },
-      }),
-    ])
-    expect(view.tools.find((t) => t.id === 't1')?.verification).toBe('verified')
   })
 })
 
@@ -251,75 +186,11 @@ describe('label helpers', () => {
   })
 
   it('toolActiveLabel 带参数摘要', () => {
-    expect(toolActiveLabel('agent_type', { text: '测试' })).toBe('输入 “测试”')
     expect(toolActiveLabel('read_file', { path: '/tmp/a.md' })).toBe('读取 /tmp/a.md')
-    expect(toolActiveLabel('agent_key', { key: 'n', modifiers: 'command' })).toBe('按键 ⌘ N')
     expect(toolActiveLabel('unknown_tool', {})).toBe('运行 unknown tool')
   })
 
   it('toolDoneLabel 完成/失败', () => {
-    expect(toolDoneLabel('agent_type', { text: 'x' }, true)).toBe('已输入 “x”')
-    expect(toolDoneLabel('agent_type', { text: 'x' }, false)).toBe('输入失败')
-  })
-})
-
-describe('parseVerificationStatus', () => {
-  it('解析 verified / unverified / frontmost_verified', () => {
-    expect(parseVerificationStatus('{"verification_status":"verified"}')).toBe('verified')
-    expect(parseVerificationStatus('{"verification_status":"unverified"}')).toBe('unverified')
-    expect(parseVerificationStatus('{"frontmost_verified":true}')).toBe('verified')
-    expect(parseVerificationStatus('hello')).toBeNull()
-    expect(parseVerificationStatus(null)).toBeNull()
-  })
-})
-
-describe('buildAgentContext', () => {
-  it('组合 Observation target、窗口、最近动作和验证状态', () => {
-    const events = [
-      event({
-        type: 'tool_started',
-        tool_call: toolCall('t1', 'agent_type', { text: ' Peregrine' }),
-      }),
-      event({
-        type: 'tool_completed',
-        tool_call: toolCall('t1', 'agent_type', {}),
-        tool_result: {
-          tool_call_id: 't1',
-          tool_name: 'agent_type',
-          success: true,
-          output: '{"verification_status":"verified","execution_mode":"background_ax"}',
-          error: null,
-          duration_ms: 20,
-        },
-      }),
-    ]
-    const context = buildAgentContext(events, {
-      id: 'snapshot-1',
-      created_at: null,
-      active_app: { name: 'Peregrine', bundle_id: null, pid: 1 },
-      target: { name: 'TextPadoror', bundle_id: 'com.example.TextPadoror', pid: 2 },
-      active_window: {
-        ref: 'w1', title: 'Untitled', bounds: { x: 0, y: 0, width: 1, height: 1 },
-      },
-      windows: [],
-      elements: [],
-      screenshot_ref: null,
-    })
-    expect(context.target).toBe('TextPadoror')
-    expect(context.window).toBe('Untitled')
-    expect(context.lastAction).toBe('已输入 “ Peregrine”')
-    expect(context.verification).toBe('已验证')
-    expect(context.executionMode).toBe('background ax')
-  })
-
-  it('没有 Session 证据时不虚构目标', () => {
-    expect(buildAgentContext([], null)).toMatchObject({
-      target: null,
-      window: null,
-      lastAction: null,
-      verification: null,
-      recentActions: [],
-    })
   })
 })
 

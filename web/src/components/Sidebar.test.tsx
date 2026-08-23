@@ -17,7 +17,6 @@ describe('Sidebar (App Shell)', () => {
       '审批',
       '长期记忆',
       '交付物',
-      '系统',
       '设置',
     ]) {
       expect(html).toContain(label)

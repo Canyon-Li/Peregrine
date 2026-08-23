@@ -46,7 +46,6 @@ class ApprovalResponse(BaseModel):
 class ApprovalRequest:
     """提交给人工审核的请求上下文。
 
-    ``run_id / conversation_id`` 是可选溯源：界面等异步审批门需要它们把
     ApprovalRequest 关联到对应 Run / Conversation（持久化为 ApprovalRequest 记录）。
     """
 
