@@ -4539,3 +4539,272 @@ kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; bac
     margin-left: 29px;
   }
 }
+
+/* ========================================================================
+   运行反馈与审批体验收口
+   ======================================================================== */
+
+/* 聊天中只保留安静的文字状态，完整执行轨迹进入 Run Detail。 */
+.agent-turn__status--working {
+  color: var(--text-tertiary);
+  font-weight: 500;
+}
+
+.live-turn__waiting {
+  min-height: 24px;
+  display: flex;
+  align-items: center;
+  margin: 8px 0 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 12px;
+}
+
+.agent-turn__error {
+  max-width: 680px;
+  padding: 15px 17px;
+  border: 1px solid #ead6d2;
+  border-left: 3px solid var(--danger);
+  border-radius: 10px;
+  background: #fcf7f5;
+}
+
+.agent-turn__error > strong {
+  color: #7f3734;
+  font-size: 13px;
+}
+
+.agent-turn__error-details {
+  margin: 8px 0 12px;
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+}
+
+.agent-turn__error-details summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.agent-turn__error-details code {
+  display: block;
+  max-height: 110px;
+  margin-top: 7px;
+  padding: 8px 10px;
+  overflow: auto;
+  border-radius: 7px;
+  background: #f3ecea;
+  color: #765a57;
+  font: 10px/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Chat 内的命令审批：先展示意图和命令，再提供克制的技术详情。 */
+.approval-card {
+  max-width: 680px;
+  padding: 17px 18px;
+  border: 1px solid #deded9;
+  border-left: 1px solid #deded9;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 8px 24px rgba(38, 40, 36, 0.07);
+}
+
+.approval-card__icon {
+  border: 0;
+  background: #eef2ef;
+  color: var(--accent);
+}
+
+.approval-card__eyebrow {
+  color: var(--warning);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.approval-card__title {
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.approval-card__command {
+  display: grid;
+  gap: 6px;
+  margin-top: 14px;
+  padding: 11px 12px;
+  border: 1px solid #e2e2dd;
+  border-radius: 9px;
+  background: #f7f7f4;
+}
+
+.approval-card__command > span {
+  color: var(--text-tertiary);
+  font-size: 9.5px;
+}
+
+.approval-card__command code {
+  overflow-x: auto;
+  color: #2d302c;
+  font: 11px/1.55 var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.approval-card__reason {
+  margin-top: 10px;
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.approval-card__tech {
+  margin-top: 8px;
+  color: var(--text-tertiary);
+  font: 10px var(--font-mono);
+}
+
+.approval-card__actions {
+  justify-content: flex-end;
+  margin-top: 15px;
+}
+
+/* 新会话入口：保持轻盈的工作台感，同时给第一次使用提供明确方向。 */
+.chat-empty {
+  width: min(100%, 760px);
+  max-width: 760px;
+  padding: 10px 0 4px;
+}
+
+.chat-empty__eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  margin-bottom: 16px;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 620;
+  letter-spacing: .08em;
+}
+
+.chat-empty__eyebrow .chat-empty__mark {
+  width: 30px;
+  height: 30px;
+  margin: 0;
+  border: 0;
+  border-radius: 10px;
+  background: var(--text-primary);
+  color: white;
+  box-shadow: 0 7px 20px rgba(25, 31, 29, .14);
+}
+
+.chat-empty h1 {
+  margin: 0 0 11px;
+  font-size: clamp(25px, 3vw, 34px);
+  font-weight: 690;
+  letter-spacing: -.045em;
+}
+
+.chat-empty p.chat-empty__intro {
+  max-width: 590px;
+  margin-bottom: 30px;
+  font-size: 13.5px;
+  line-height: 1.7;
+}
+
+.chat-empty__prompts {
+  max-width: 720px;
+  gap: 10px;
+}
+
+.chat-empty__prompts button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 11px;
+  min-height: 84px;
+  padding: 14px 15px;
+  border: 1px solid rgba(45, 58, 53, .1);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, .52);
+  box-shadow: 0 9px 30px rgba(24, 35, 31, .035);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+}
+
+.chat-empty__prompts button:hover {
+  border-color: rgba(45, 83, 70, .22);
+  background: rgba(255, 255, 255, .84);
+  box-shadow: 0 12px 32px rgba(24, 35, 31, .07);
+  transform: translateY(-1px);
+}
+
+.chat-empty__prompt-icon {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  background: rgba(48, 99, 81, .08);
+  color: var(--accent);
+}
+
+.chat-empty__prompt-copy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.chat-empty__prompt-copy strong {
+  color: var(--text-primary);
+  font-size: 12.5px;
+  font-weight: 660;
+}
+
+.chat-empty__prompt-copy small {
+  color: var(--text-tertiary);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.chat-empty__prompt-action {
+  color: var(--text-tertiary);
+  opacity: .5;
+  transition: color var(--transition-fast), opacity var(--transition-fast),
+    transform var(--transition-fast);
+}
+
+.chat-empty__prompts button:hover .chat-empty__prompt-action {
+  color: var(--accent);
+  opacity: 1;
+  transform: rotate(90deg);
+}
+
+.chat-empty__hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 20px;
+  color: var(--text-tertiary);
+  font-size: 10px;
+}
+
+.chat-empty__hint i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--border-strong);
+}
+
+@media (max-width: 760px) {
+  .chat-empty__prompts {
+    grid-template-columns: 1fr;
+  }
+
+  .chat-empty h1 {
+    font-size: 25px;
+  }
+}

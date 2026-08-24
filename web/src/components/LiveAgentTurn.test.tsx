@@ -31,8 +31,8 @@ describe('LiveAgentTurn', () => {
   it('无事件时显示中文等待提示', () => {
     const html = renderToStaticMarkup(<LiveAgentTurn runId="run-1" step={1} events={[]} />)
     expect(html).toContain('Peregrine')
-    expect(html).toContain('live-turn__pulse')
-    expect(html).toContain('正在执行…')
+    expect(html).not.toContain('live-turn__pulse')
+    expect(html).toContain('正在思考')
     expect(html).toContain('live-turn__waiting')
   })
 
@@ -78,7 +78,7 @@ describe('LiveAgentTurn', () => {
     expect(html).not.toContain('assistant-reasoning')
   })
 
-  it('tool timeline 合并 started/completed 为人类可读动作', () => {
+  it('聊天消息不展示工具圆点和竖线时间线', () => {
     const html = renderToStaticMarkup(
       <LiveAgentTurn
         runId="run-1"
@@ -100,12 +100,12 @@ describe('LiveAgentTurn', () => {
         ]}
       />,
     )
-    expect(html).toContain('turn-timeline')
-    expect(html).toContain('agent-action--done')
-    expect(html).toContain('已输入 “测试”')
+    expect(html).not.toContain('turn-timeline')
+    expect(html).not.toContain('agent-action')
+    expect(html).toContain('正在思考')
   })
 
-  it('审批等待显示中文确认提示', () => {
+  it('审批期间消息仍只显示正在思考', () => {
     const html = renderToStaticMarkup(
       <LiveAgentTurn
         runId="run-1"
@@ -122,56 +122,8 @@ describe('LiveAgentTurn', () => {
         ]}
       />,
     )
-    expect(html).toContain('agent-action--waiting')
-    expect(html).toContain('等待你的确认')
-  })
-
-  it('web 审批等待显示中文操作确认提示', () => {
-    const html = renderToStaticMarkup(
-      <LiveAgentTurn
-        runId="run-1"
-        step={1}
-        events={[
-          event({
-            type: 'tool_started',
-            tool_call: { id: 't1', name: 'agent_type', arguments: {} },
-          }),
-          event({
-            type: 'tool_approval_required',
-            tool_call: { id: 't1', name: 'agent_type', arguments: {} },
-          }),
-        ]}
-      />,
-    )
-    expect(html).toContain('等待操作确认')
-  })
-
-  it('agent 操作未验证时显示中文验证状态', () => {
-    const html = renderToStaticMarkup(
-      <LiveAgentTurn
-        runId="run-1"
-        step={1}
-        events={[
-          event({
-            type: 'tool_started',
-            tool_call: { id: 't1', name: 'agent_click', arguments: {} },
-          }),
-          event({
-            type: 'tool_completed',
-            tool_call: { id: 't1', name: 'agent_click', arguments: {} },
-            tool_result: {
-              tool_call_id: 't1',
-              tool_name: 'agent_click',
-              success: true,
-              output: '{"verification_status":"unverified"}',
-              error: null,
-              duration_ms: 5,
-            },
-          }),
-        ]}
-      />,
-    )
-    expect(html).toContain('操作已发送 · 等待验证')
+    expect(html).not.toContain('agent-action--waiting')
+    expect(html).toContain('正在思考')
   })
 
   it('usage footer 使用中文字段显示步骤、操作、用量和耗时', () => {
@@ -243,7 +195,7 @@ describe('LiveAgentTurn', () => {
   })
 
   it.each([
-    ['failed', 'agent_failed', '执行已停止'],
+    ['failed', 'agent_failed', '模型暂时无法响应'],
     ['interrupted', 'agent_failed', '执行已中断'],
   ] as const)('持久展示 %s 终态', (status, type, label) => {
     const html = renderToStaticMarkup(

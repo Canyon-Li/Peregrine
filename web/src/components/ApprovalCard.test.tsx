@@ -29,12 +29,14 @@ describe('ApprovalCard', () => {
     expect(html).toContain('approval-card')
   })
 
-  it('提供 Approve / Deny 按钮', () => {
+  it('提供中文允许 / 拒绝按钮', () => {
     const html = renderToStaticMarkup(
       <ApprovalCard approval={approval} onApprove={() => {}} onDeny={() => {}} />,
     )
-    expect(html).toContain('Approve')
-    expect(html).toContain('Deny')
+    expect(html).toContain('允许执行')
+    expect(html).toContain('拒绝')
+    expect(html).toContain('即将执行')
+    expect(html).toContain('ls -la')
   })
 
   it('busy 时按钮禁用', () => {
@@ -42,23 +44,5 @@ describe('ApprovalCard', () => {
       <ApprovalCard approval={approval} busy onApprove={() => {}} onDeny={() => {}} />,
     )
     expect(html).toContain('disabled=""')
-  })
-
-  it('web 审批显示人类可读动作名与描述', () => {
-    const agentApproval: ApprovalRequest = {
-      ...approval,
-      tool_name: 'agent_type',
-      arguments: { text: 'hello' },
-    }
-    const html = renderToStaticMarkup(
-      <ApprovalCard
-        approval={agentApproval}
-        onApprove={() => {}}
-        onDeny={() => {}}
-      />,
-    )
-    expect(html).toContain('Allow Type text?')
-    expect(html).toContain('Peregrine wants to type text')
-    expect(html).toContain('(agent_type)')
   })
 })

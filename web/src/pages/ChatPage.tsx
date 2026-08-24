@@ -375,25 +375,24 @@ export default function ChatPage({
 
   // Command palette（⌘K）：轻量能力入口，不做永久按钮墙。
   const composerCommands: ComposerCommand[] = [
-    { id: 'new', label: 'New conversation', icon: 'plus', onSelect: () => newConversationMutation.mutate() },
+    { id: 'new', label: '新建会话', icon: 'plus', onSelect: () => newConversationMutation.mutate() },
     {
       id: 'plan',
-      label: mode === 'plan' ? 'Switch to Normal mode' : 'Switch to Plan mode',
+      label: mode === 'plan' ? '切换到普通模式' : '切换到规划模式',
       icon: 'check',
       onSelect: () => setMode((m) => (m === 'plan' ? 'normal' : 'plan')),
     },
-    { id: 'agent', label: 'Open Agent', icon: 'agent', onSelect: () => onNavigate?.('agent') },
     {
       id: 'runs',
-      label: 'View current Run',
+      label: '查看当前运行',
       icon: 'runs',
       onSelect: () => {
         if (activeRunId) onOpenRun?.(activeRunId)
       },
     },
-    { id: 'stop', label: 'Stop Run', icon: 'close', onSelect: () => void stopRun() },
-    { id: 'artifacts', label: 'View artifacts', icon: 'artifacts', onSelect: () => onNavigate?.('artifacts') },
-    { id: 'settings', label: 'Settings', icon: 'settings', onSelect: () => onNavigate?.('settings') },
+    { id: 'stop', label: '停止运行', icon: 'close', onSelect: () => void stopRun() },
+    { id: 'artifacts', label: '查看产物', icon: 'artifacts', onSelect: () => onNavigate?.('artifacts') },
+    { id: 'settings', label: '打开设置', icon: 'settings', onSelect: () => onNavigate?.('settings') },
   ]
 
   const storedMessages = conversationQuery.data?.messages ?? []
@@ -510,7 +509,7 @@ export default function ChatPage({
 
       <div className="chat-right">
         <RunStatusBar
-          title={selectedConversation?.title || 'New conversation'}
+          title={selectedConversation?.title || '新会话'}
           conversationSidebarOpen={conversationSidebarOpen}
           onToggleConversationSidebar={() => setConversationSidebarOpen((open) => !open)}
           runStatus={activeRunStatus}
@@ -539,15 +538,15 @@ export default function ChatPage({
           <div className="message-thread">
             {selectedId === null ? (
               <section className="no-conversation">
-                <h1>Start new work</h1>
-                <p>Create a conversation, then give Peregrine something to work on.</p>
+                <h1>开始一项新工作</h1>
+                <p>创建会话，然后告诉 Peregrine 你希望完成的结果。</p>
                 <button
                   type="button"
                   className="btn btn-primary"
                   onClick={() => newConversationMutation.mutate()}
                   disabled={newConversationMutation.isPending}
                 >
-                  <Icon name="plus" size={15} /> New conversation
+                  <Icon name="plus" size={15} /> 新建会话
                 </button>
               </section>
             ) : showNewConversationHome ? (
