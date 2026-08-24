@@ -23,7 +23,10 @@ backend/.peregrine/
 backend/.peregrine/
 
 # Local evaluation artifacts
-backend/tests/eval/reports/*.md
+backend/tests/eval_legacy/reports/*.md
+!backend/tests/eval_legacy/reports/README.md
+backend/tests/eval_legacy/reports/historical/runtime/*.md
+backend/tests/eval_legacy/reports/historical/skill_learning/*.md
 
 # Web (Vite)
 web/node_modules/
