@@ -114,6 +114,12 @@ _RUN_BUDGET_FINALIZATION_MESSAGE = (
     "给出简洁的最终答复；明确区分已完成、未完成和无法验证的内容，不要伪造"
     "执行结果。"
 )
+_RUN_BUDGET_CLOSING_MESSAGE = (
+    "本 Run 已达到 Main Agent 用量收口线，现在进入 Closing。仅保留完成当前"
+    "目标所必需的交付工具；不要继续搜索、调查或扩展任务。若已有结果尚未写入"
+    "文件、发布为交付物或同步到任务状态，请立即完成这一次交付；否则直接给出"
+    "简洁的最终答复。"
+)
 _RUN_BUDGET_WARNING_MESSAGE = (
     "本 Run 的累计 Main Agent 用量已进入预警区。请减少不必要的重复调查和工具"
     "调用，优先完成当前目标；仍可在确有必要时继续使用工具。"
@@ -173,7 +179,7 @@ class AgentRuntime:
         provider: ModelProvider | str | None = None,
         model: str | None = None,
         system_prompt: str | None = None,
-        max_steps: int = 10,
+        max_steps: int = 12,
         max_tool_rounds: int | None = None,
         max_output_tokens: int | None = None,
         tool_executor: ToolExecutor | None = None,
@@ -419,7 +425,9 @@ class AgentRuntime:
         plan_task_id: str | None = None
         finalization_pending = False
         budget_warning_emitted = False
-        budget_finalization_attempted = False
+        budget_closing_started = False
+        budget_closing_delivery_used = False
+        budget_closing_reporting_attempted = False
         empty_final_retry_used = False
         textual_tool_call_retry_used = False
         response_repair_message: Message | None = None
@@ -506,40 +514,47 @@ class AgentRuntime:
                 )
             budget_forces_final = budget_decision.should_finalize
             if budget_forces_final:
-                if budget_finalization_attempted:
+                if budget_closing_delivery_used:
+                    if budget_closing_reporting_attempted:
+                        await emitter.emit(
+                            AgentEventType.RUN_BUDGET_EXCEEDED,
+                            step=step,
+                            **_run_budget_event_fields(
+                                budget_decision,
+                                budget_config,
+                                status=RunBudgetStatus.EXCEEDED,
+                            ),
+                        )
+                        return await stop_with_error(
+                            RunBudgetExceededError(
+                                "dedicated closing report call was already used"
+                            ),
+                            AgentStopReason.RUN_BUDGET,
+                            step=max(0, step - 1),
+                        )
+                    budget_closing_reporting_attempted = True
+                elif not budget_closing_started:
+                    budget_closing_started = True
                     await emitter.emit(
-                        AgentEventType.RUN_BUDGET_EXCEEDED,
+                        AgentEventType.RUN_BUDGET_FINALIZING,
                         step=step,
-                        **_run_budget_event_fields(
-                            budget_decision,
-                            budget_config,
-                            status=RunBudgetStatus.EXCEEDED,
-                        ),
+                        **_run_budget_event_fields(budget_decision, budget_config),
                     )
-                    return await stop_with_error(
-                        RunBudgetExceededError(
-                            "dedicated finalization call was already used"
-                        ),
-                        AgentStopReason.RUN_BUDGET,
-                        step=max(0, step - 1),
-                    )
-                budget_finalization_attempted = True
-                await emitter.emit(
-                    AgentEventType.RUN_BUDGET_FINALIZING,
-                    step=step,
-                    **_run_budget_event_fields(budget_decision, budget_config),
-                )
             if self._checkpoint_store is not None:
                 await self._checkpoint_store.before_model(run_id, step=step)
             tool_round_limit_reached = (
                 self._max_tool_rounds is not None
                 and len(tool_rounds) >= self._max_tool_rounds
             )
-            force_final_answer = (
-                finalization_step
-                or agent_halted
-                or budget_forces_final
-                or tool_round_limit_reached
+            forced_without_budget = (
+            )
+            closing_can_deliver = (
+                budget_forces_final
+                and not budget_closing_delivery_used
+                and not forced_without_budget
+            )
+            force_final_answer = forced_without_budget or (
+                budget_forces_final and not closing_can_deliver
             )
             # 原始历史保持不变；模型请求视图会移除旧版持久提示词中的固定日期。
             raw_source_messages = tuple(
@@ -560,14 +575,21 @@ class AgentRuntime:
                 request_history_offset,
             )
             request_messages = source_messages
-            request_tools = (
-                ()
-                if force_final_answer
-                else self._tool_registry.model_definitions_for_mode(
+            if closing_can_deliver:
+                request_tools = self._tool_registry.closing_definitions_for_mode(
                     mode,
                     activated_names=activated_tools,
                 )
-            )
+                if not request_tools:
+                    closing_can_deliver = False
+                    force_final_answer = True
+            elif force_final_answer:
+                request_tools = ()
+            else:
+                request_tools = self._tool_registry.model_definitions_for_mode(
+                    mode,
+                    activated_names=activated_tools,
+                )
             # 先解析实际使用的模型和输出上限，确保预算与请求完全一致。
             try:
                 adapter = self._model_registry.get(self._provider)
@@ -576,7 +598,7 @@ class AgentRuntime:
                 effective_max_output_tokens = (
                     self._max_output_tokens or adapter.config.default_max_output_tokens
                 )
-                if budget_forces_final:
+                if budget_forces_final and force_final_answer:
                     effective_max_output_tokens = min(
                         effective_max_output_tokens,
                         budget_config.finalization_max_output_tokens,
@@ -660,7 +682,15 @@ class AgentRuntime:
                         *context_messages,
                         *request_messages[request_historical_message_count:],
                     )
-                if force_final_answer:
+                if closing_can_deliver:
+                    request_messages = (
+                        *request_messages,
+                        Message(
+                            role=MessageRole.SYSTEM,
+                            content=_RUN_BUDGET_CLOSING_MESSAGE,
+                        ),
+                    )
+                elif force_final_answer:
                         final_instruction = _RUN_BUDGET_FINALIZATION_MESSAGE
                     else:
                         final_instruction = (
@@ -808,18 +838,32 @@ class AgentRuntime:
                 warning_appended_after_prepare = False
             if budget_decision.should_finalize and not budget_forces_final:
                 budget_forces_final = True
-                force_final_answer = True
-                budget_finalization_attempted = True
-                request_tools = ()
-                effective_max_output_tokens = min(
-                    effective_max_output_tokens,
-                    budget_config.finalization_max_output_tokens,
-                )
+                budget_closing_started = True
+                closing_can_deliver = not forced_without_budget
+                if closing_can_deliver:
+                    request_tools = (
+                        self._tool_registry.closing_definitions_for_mode(
+                            mode,
+                            activated_names=activated_tools,
+                        )
+                    )
+                    closing_can_deliver = bool(request_tools)
+                force_final_answer = forced_without_budget or not closing_can_deliver
+                if force_final_answer:
+                    request_tools = ()
+                    effective_max_output_tokens = min(
+                        effective_max_output_tokens,
+                        budget_config.finalization_max_output_tokens,
+                    )
                 request_messages = (
                     *request_messages,
                     Message(
                         role=MessageRole.SYSTEM,
-                        content=_RUN_BUDGET_FINALIZATION_MESSAGE,
+                        content=(
+                            _RUN_BUDGET_CLOSING_MESSAGE
+                            if closing_can_deliver
+                            else _RUN_BUDGET_FINALIZATION_MESSAGE
+                        ),
                     ),
                 )
                 await emitter.emit(
@@ -1171,15 +1215,24 @@ class AgentRuntime:
                     metadata={"active_skill_names": tuple(active_skills)},
                     mode=mode,
                 )
-                if agent_halted and tool_call.name.startswith("agent_"):
+                    self._tool_registry.is_allowed_during_closing(
+                        tool_call.name,
+                        mode,
+                    )
+                    and (
+                        not self._tool_registry.is_deferred(tool_call.name)
+                        or tool_call.name in activated_tools
+                    )
+                ):
+                    # Closing 不仅隐藏探索工具，也在执行层拒绝模型伪造的调用。
                     await tool_event_hook.before_execute(execution_context)
                     result = ToolResult(
                         tool_call_id=tool_call.id,
                         tool_name=tool_call.name,
                         success=False,
                         error=(
-                            "agent_attempts_halted: repeated failures without "
-                            "web progress; explain the blocker instead"
+                            "Tool is not allowed during budget closing "
+                            "(delivery tools only)."
                         ),
                         duration_ms=0,
                     )
@@ -1269,6 +1322,9 @@ class AgentRuntime:
                     records=tuple(round_records),
                 )
             )
+            if closing_can_deliver:
+                # Closing 最多保留一次交付工具轮；下一请求只负责汇报结果。
+                budget_closing_delivery_used = True
             # 本轮模型没有见过新定义，必须等下一步请求后才能调用。
             activated_tools.update(pending_activations)
             finalization_pending = (
