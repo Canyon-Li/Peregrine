@@ -38,7 +38,6 @@ export type IconName =
   | 'automations'
   | 'approvals'
   | 'artifacts'
-  | 'agent'
   | 'memory'
   | 'settings'
   | 'plus'

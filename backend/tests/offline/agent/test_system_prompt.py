@@ -26,6 +26,7 @@ def test_default_system_prompt_excludes_non_deliverables() -> None:
     # 中间文件 / 临时文件 / Trace / Screenshot 不应发布为 Artifact。
     assert "不要发布为 Artifact" in DEFAULT_SYSTEM_PROMPT
     assert "Trace" in DEFAULT_SYSTEM_PROMPT
+    assert "截图" in DEFAULT_SYSTEM_PROMPT
 
 
 def test_default_system_prompt_no_formal_publish_without_deliverable() -> None:

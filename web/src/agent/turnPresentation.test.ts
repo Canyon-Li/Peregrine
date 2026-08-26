@@ -46,25 +46,33 @@ describe('buildTurnView: tool timeline', () => {
       event({ type: 'agent_started', event_time: '2026-08-21T00:00:00.000Z' }),
       event({
         type: 'tool_started',
+        tool_call: toolCall('t1', 'write_file', { path: '/a.md' }),
       }),
       event({
         type: 'tool_completed',
+        tool_call: { id: 't1', name: 'write_file', arguments: {} },
+        tool_result: { tool_call_id: 't1', tool_name: 'write_file', success: true, output: 'ok', error: null, duration_ms: 10 },
       }),
       event({ type: 'agent_completed', event_time: '2026-08-21T00:00:10.000Z' }),
     ])
     expect(view.tools).toHaveLength(1)
     expect(view.tools[0].state).toBe('done')
+    expect(view.tools[0].label).toBe('已写入文件')
     expect(view.toolCount).toBe(1)
     expect(view.durationMs).toBe(10_000)
   })
 
   it('tool 失败标记 failed', () => {
     const view = buildTurnView([
+      event({ type: 'tool_started', tool_call: toolCall('t1', 'run_shell_command', {}) }),
       event({
         type: 'tool_completed',
+        tool_call: { id: 't1', name: 'run_shell_command', arguments: {} },
+        tool_result: { tool_call_id: 't1', tool_name: 'run_shell_command', success: false, output: null, error: 'x', duration_ms: 5 },
       }),
     ])
     expect(view.tools[0].state).toBe('failed')
+    expect(view.tools[0].label).toBe('命令失败')
   })
 
   it('toolCount 按 tool_call_id 去重', () => {
@@ -99,8 +107,10 @@ describe('buildTurnView: approval', () => {
 
   it('denied 后状态 failed', () => {
     const view = buildTurnView([
+      event({ type: 'tool_approval_required', tool_call: toolCall('t1', 'run_shell_command', {}) }),
       event({
         type: 'tool_approval_completed',
+        tool_call: toolCall('t1', 'run_shell_command', {}),
         approval_decision: 'denied',
       }),
     ])
@@ -186,11 +196,14 @@ describe('label helpers', () => {
   })
 
   it('toolActiveLabel 带参数摘要', () => {
+    expect(toolActiveLabel('write_file', { path: '/tmp/a.md' })).toBe('写入 /tmp/a.md')
     expect(toolActiveLabel('read_file', { path: '/tmp/a.md' })).toBe('读取 /tmp/a.md')
     expect(toolActiveLabel('unknown_tool', {})).toBe('运行 unknown tool')
   })
 
   it('toolDoneLabel 完成/失败', () => {
+    expect(toolDoneLabel('write_file', { path: '/tmp/a.md' }, true)).toBe('已写入文件')
+    expect(toolDoneLabel('write_file', { path: '/tmp/a.md' }, false)).toBe('无法写入文件')
   })
 })
 

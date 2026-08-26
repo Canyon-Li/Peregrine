@@ -1,3 +1,4 @@
+/** 共享 RpcClient 单例 + 便捷 typed methods。 */
 
 import { WS_URL } from '../api/config'
 import { RpcClient } from './client'

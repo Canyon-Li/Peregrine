@@ -44,6 +44,8 @@ export default function ApprovalCard({
   onApprove,
   onDeny,
 }: ApprovalCardProps): ReactElement {
+  const title = chatApprovalLabel(approval)
+  const description = chatApprovalDescription(approval)
   const command = commandPreview(approval)
   const argsText = (() => {
     try {

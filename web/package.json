@@ -2,8 +2,12 @@
   "name": "peregrine-web",
   "version": "0.1.0",
   "private": true,
+  "description": "Peregrine Web — React + TypeScript + Vite",
   "scripts": {
     "dev": "vite",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build": "npm run typecheck && vite build",
+    "test": "vitest run"
   },
   "dependencies": {
     "@shikijs/engine-javascript": "^4.4.3",
@@ -25,5 +29,6 @@
     "@vitejs/plugin-react": "^4.3.2",
     "typescript": "^5.6.2",
     "vite": "^5.4.8",
+    "vitest": "^2.1.4"
   }
 }

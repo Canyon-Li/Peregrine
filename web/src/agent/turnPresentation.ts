@@ -49,6 +49,7 @@ export interface TurnView {
     | 'interrupted'
   finalText: string
   currentAction: string | null
+  capability: 'Files' | 'Web' | 'Memory' | 'Task' | 'Artifact' | null
   error: { title: string; message: string; technical: string | null } | null
 }
 
@@ -98,6 +99,7 @@ export function toolActiveLabel(name: string, args: unknown): string {
   }
 }
 
+export function toolDoneLabel(name: string, _args: unknown, ok: boolean): string {
   if (!ok) {
     switch (name) {
       case 'read_file': return '无法读取文件'
@@ -385,6 +387,9 @@ export function buildTurnView(
         ? 'completed'
         : hasPendingApproval
           ? 'waiting_approval'
+          : hasActiveTool
+            ? 'working'
+            : 'thinking'
 
   const currentTool = [...tools].reverse().find(
     (tool) => tool.state === 'active' || tool.state === 'waiting',

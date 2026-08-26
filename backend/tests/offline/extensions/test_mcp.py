@@ -35,6 +35,7 @@ from app.models.types import (
     ToolCall,
     ToolPermission,
 )
+
 from app.tools import ToolExecutor, ToolRegistry
 
 
@@ -400,6 +401,22 @@ async def test_missing_environment_reference_fails_only_that_server(
 
     assert statuses[0].state is MCPServerState.FAILED
     assert "PEREGRINE_MISSING_MCP_KEY" in (statuses[0].error or "")
+
+
+def test_mcp_environment_does_not_inherit_unlisted_host_secret(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.mcp.client import _resolve_environment
+
+    monkeypatch.setenv("PEREGRINE_HOST_SECRET", "must-not-leak")
+    monkeypatch.setenv("PATH", "/usr/bin")
+
+    environment = _resolve_environment(
+        MCPServerConfig(name="safe_env", command="unused")
+    )
+
+    assert environment["PATH"] == "/usr/bin"
+    assert "PEREGRINE_HOST_SECRET" not in environment
 
 
 def test_serialize_mcp_result_preserves_text_and_structured_content() -> None:

@@ -23,6 +23,10 @@ MAX_SHELL_TIMEOUT_SECONDS = 120.0
 
 
 class ShellCommandTool(BaseTool):
+    def __init__(
+        self,
+        workspace_root: str | Path | None = None,
+    ) -> None:
         self._workspace_root = workspace_root_path(workspace_root)
 
     @property

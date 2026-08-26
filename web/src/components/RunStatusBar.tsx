@@ -77,6 +77,9 @@ export default function RunStatusBar({
 }): ReactElement {
   const turnLabel = turnState === 'waiting_approval'
     ? { label: '等待确认', tone: 'waiting' }
+    : turnState === 'thinking'
+      ? { label: '正在分析', tone: 'working' }
+      : undefined
   const status = turnLabel ?? (runStatus ? STATUS_LABEL[runStatus] : undefined)
   const running = runStatus === 'running'
   const stopped = runStatus === 'failed' || runStatus === 'interrupted'

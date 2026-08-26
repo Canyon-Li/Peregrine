@@ -11,6 +11,7 @@ tests/
 
 ## offline
 
+`offline/` 按 Agent、Context、Memory、Task 等生产领域分组。这里的测试不得调用
 真实模型 API 或依赖外部服务，适合本地回归和 CI。
 
 ```bash
@@ -21,6 +22,8 @@ cd backend
 
 ## fixtures
 
+`fixtures/` 只保存可重复、无副作用的测试夹具，例如 Fake MCP Server。
+不要把真实运行数据、临时输出或模型报告放进这里。
 
 ## eval_legacy
 

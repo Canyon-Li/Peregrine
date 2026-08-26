@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query'
 import { useState } from 'react'
 
 import { getSystemInfo } from '../api/system'
@@ -68,6 +69,7 @@ export default function SettingsPage(): React.JSX.Element {
 
               <section className="settings-group">
                 <header className="settings-group__header">
+                  <div><h3>运行环境</h3><p>当前应用版本</p></div>
                 </header>
                 <dl className="settings-info-list">
                   <InfoRow label="应用版本" value="0.1.0" />

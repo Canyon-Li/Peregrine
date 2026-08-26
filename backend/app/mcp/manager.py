@@ -27,11 +27,13 @@ class MCPClientManager:
         self,
         configs: Sequence[MCPServerConfig],
         *,
+        client_factory: MCPClientFactory | None = None,
     ) -> None:
         names = [config.name for config in configs]
         if len(names) != len(set(names)):
             raise MCPConfigurationError("MCP Server 名称不能重复")
         self._configs = tuple(configs)
+        self._client_factory = client_factory or StdioMCPClient
         self._clients: dict[str, MCPClientProtocol] = {}
         self._registered_names: dict[str, tuple[str, ...]] = {}
         self._states = {

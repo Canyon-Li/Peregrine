@@ -547,6 +547,7 @@ class AgentRuntime:
                 and len(tool_rounds) >= self._max_tool_rounds
             )
             forced_without_budget = (
+                finalization_step or tool_round_limit_reached
             )
             closing_can_deliver = (
                 budget_forces_final
@@ -691,10 +692,13 @@ class AgentRuntime:
                         ),
                     )
                 elif force_final_answer:
+                    if budget_forces_final:
                         final_instruction = _RUN_BUDGET_FINALIZATION_MESSAGE
                     else:
                         final_instruction = (
                             "工具调用轮次已用完。请读取最后一条工具结果，停止"
+                            "调用工具并直接回答用户。不要把未确认的执行结果"
+                            "描述为已经完成。"
                         )
                     request_messages = (
                         *request_messages,
@@ -1215,6 +1219,7 @@ class AgentRuntime:
                     metadata={"active_skill_names": tuple(active_skills)},
                     mode=mode,
                 )
+                if closing_can_deliver and not (
                     self._tool_registry.is_allowed_during_closing(
                         tool_call.name,
                         mode,
@@ -1330,6 +1335,7 @@ class AgentRuntime:
             finalization_pending = (
                 step == self._max_steps
                 and (
+                    self._run_budget.evaluate(
                         usage,
                         chargeable_tokens_override=budget_chargeable_tokens,
                         model_calls_override=main_model_calls,

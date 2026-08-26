@@ -19,18 +19,19 @@ const STARTERS: ReadonlyArray<{
   {
     title: '整理文件',
     description: '读取、归类和生成文件，重要修改全程可见',
-    prompt: EXAMPLE_PROMPTS[1],
+    prompt: EXAMPLE_PROMPTS[0],
     icon: 'file',
   },
   {
     title: '安排自动化',
     description: '把重复工作交给 Peregrine 按时执行',
-    prompt: EXAMPLE_PROMPTS[2],
+    prompt: EXAMPLE_PROMPTS[1],
     icon: 'automations',
   },
   {
     title: '调研与规划',
     description: '收集信息、拆解目标，并持续跟踪任务进度',
+    prompt: EXAMPLE_PROMPTS[2],
     icon: 'runs',
   },
 ]
@@ -43,6 +44,7 @@ export default function ChatEmptyState({
   return (
     <section className="chat-empty" aria-label="开始新会话">
       <div className="chat-empty__eyebrow">
+        <span className="chat-empty__mark">P</span>
         <span>新的工作空间</span>
       </div>
       <h1>今天想让 Peregrine 帮你完成什么？</h1>

@@ -1,5 +1,6 @@
 """Artifact 领域模型：Agent 显式发布的用户交付物（immutable result）。
 
+不是 Trace / Checkpoint / 普通 ToolResult / 截图 —— 只有
 Agent 通过 ``artifact_publish`` 显式发布的才算 Artifact。
 """
 

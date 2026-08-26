@@ -33,7 +33,9 @@ async def main() -> None:
     r = await store.create(
         run_id=None,
         conversation_id=None,
+        tool_name="run_shell_command",
         tool_call_id="c1",
+        arguments={"command": "ls"},
         ui_scope="web",
     )
     print("created ui_scope:", r.ui_scope)

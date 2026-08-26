@@ -91,12 +91,14 @@ describe('MessageList', () => {
             role: 'assistant',
             content: '让我先看一下',
             tool_calls: [
+              { id: 'call-1', name: 'read_file', arguments: { path: '/tmp/a.md' } },
             ],
           },
           {
             role: 'assistant',
             content: '让我操作一下',
             tool_calls: [
+              { id: 'call-2', name: 'write_file', arguments: { path: '/tmp/b.md' } },
             ],
           },
           { role: 'assistant', content: '完成，这是结果。' },
@@ -105,6 +107,7 @@ describe('MessageList', () => {
     )
     expect(html).not.toContain('让我先看一下')
     expect(html).not.toContain('让我操作一下')
+    expect(html).not.toContain('read_file')
     expect(html).toContain('完成，这是结果。')
     // 只有最终一条正文，只有一个头像
     expect(html.match(/message-assistant__avatar/g)).toHaveLength(1)
@@ -119,31 +122,37 @@ describe('MessageList', () => {
             role: 'assistant',
             content: '',
             tool_calls: [
+              { id: 'c1', name: 'list_files', arguments: { path: '/tmp' } },
             ],
           },
           {
             role: 'tool',
             tool_call_id: 'c1',
+            content: '{"success":true,"files":["a.md","b.md"]}',
           },
           {
             role: 'assistant',
             content: '',
+            tool_calls: [{ id: 'c2', name: 'read_file', arguments: { path: '/tmp/a.md' } }],
           },
           {
             role: 'tool',
             tool_call_id: 'c2',
             content:
+              '{"path":"/tmp/a.md","size":128,"duration_ms":120}',
           },
           {
             role: 'assistant',
             content: '',
             tool_calls: [
+              { id: 'c3', name: 'write_file', arguments: { path: '/tmp/note.md', text: '测试新建' } },
             ],
           },
           {
             role: 'tool',
             tool_call_id: 'c3',
             content:
+              '{"success":true,"bytes_written":12}',
           },
           {
             role: 'assistant',
@@ -155,7 +164,9 @@ describe('MessageList', () => {
     expect(html).toContain('新建笔记输入测试新建')
     expect(html).toContain('✅ 完成！已经在备忘录中新建一条笔记')
     // 绝不能出现 ToolResult 的 JSON 噪音
+    expect(html).not.toContain('"files":["a.md"')
     expect(html).not.toContain('"duration_ms"')
+    expect(html).not.toContain('"bytes_written"')
     // 只显示最终回答，只有一个头像
     expect(html.match(/message-assistant__avatar/g)).toHaveLength(1)
   })

@@ -17,6 +17,15 @@ from .errors import MCPConnectionError, MCPToolCallError, MCPToolDiscoveryError
 from .models import MCPRemoteTool, MCPServerConfig
 
 _ENV_REFERENCE = re.compile(r"^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$")
+_SAFE_INHERITED_ENVIRONMENT = (
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+    "TMPDIR",
+)
 
 
 class MCPClientProtocol(Protocol):
@@ -34,6 +43,10 @@ class MCPClientProtocol(Protocol):
 class StdioMCPClient:
     """维护一个 MCP stdio 子进程及其 ClientSession。"""
 
+    def __init__(
+        self,
+        config: MCPServerConfig,
+    ) -> None:
         self.config = config
         self._stack: AsyncExitStack | None = None
         self._session: ClientSession | None = None
@@ -45,12 +58,15 @@ class StdioMCPClient:
             return
         stack = AsyncExitStack()
         try:
+            environment = _resolve_environment(self.config)
             async with asyncio.timeout(self.config.startup_timeout_seconds):
                 streams = await stack.enter_async_context(
                     stdio_client(
                         StdioServerParameters(
                             command=self.config.command,
                             args=list(self.config.args),
+                            env=environment,
+                            cwd=self.config.cwd or os.getcwd(),
                         )
                     )
                 )
@@ -147,7 +163,14 @@ async def _close_quietly(stack: AsyncExitStack) -> None:
         pass
 
 
+def _resolve_environment(config: MCPServerConfig) -> dict[str, str]:
+    """从白名单环境开始解析引用，不再继承 Host 的全部密钥。"""
 
+    resolved = {
+        key: os.environ[key]
+        for key in _SAFE_INHERITED_ENVIRONMENT
+        if os.environ.get(key)
+    }
     for key, value in config.env.items():
         match = _ENV_REFERENCE.fullmatch(value)
         if match is None:
@@ -159,6 +182,7 @@ async def _close_quietly(stack: AsyncExitStack) -> None:
                 f"MCP Server '{config.name}' 缺少环境变量 {variable}"
             )
         resolved[key] = os.environ[variable]
+    return resolved
 
 
 __all__ = ["MCPClientProtocol", "StdioMCPClient", "serialize_mcp_result"]

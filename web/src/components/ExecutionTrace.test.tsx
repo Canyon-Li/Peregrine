@@ -36,6 +36,7 @@ describe('ExecutionTrace', () => {
         sequence: 2,
         type: 'tool_approval_completed',
         approval_decision: 'approved',
+        tool_call: { id: 'call-1', name: 'write_file', arguments: { path: '/tmp/a.md' } },
       }),
       event({
         event_id: 'tool-1',
@@ -43,6 +44,7 @@ describe('ExecutionTrace', () => {
         type: 'tool_completed',
         tool_result: {
           tool_call_id: 'call-1',
+          tool_name: 'write_file',
           success: true,
           output: 'delivered',
           error: null,
@@ -53,6 +55,7 @@ describe('ExecutionTrace', () => {
     const html = renderToStaticMarkup(<ExecutionTrace events={events} />)
     expect(html).toContain('Step 1')
     expect(html).toContain('tool approval completed')
+    expect(html).toContain('write_file')
     expect(html).toContain('125ms')
     expect(html).toContain('&quot;approval_decision&quot;: &quot;approved&quot;')
   })

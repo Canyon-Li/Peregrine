@@ -44,6 +44,7 @@ describe('LiveAgentTurn', () => {
         events={[
           event({
             type: 'tool_started',
+            tool_call: { id: 't1', name: 'run_shell_command', arguments: {} },
           }),
         ]}
         streamText="正在生成 **报告**"
@@ -86,11 +87,14 @@ describe('LiveAgentTurn', () => {
         events={[
           event({
             type: 'tool_started',
+            tool_call: { id: 't1', name: 'write_file', arguments: { path: '/tmp/a.md' } },
           }),
           event({
             type: 'tool_completed',
+            tool_call: { id: 't1', name: 'write_file', arguments: {} },
             tool_result: {
               tool_call_id: 't1',
+              tool_name: 'write_file',
               success: true,
               output: 'ok',
               error: null,
@@ -102,6 +106,7 @@ describe('LiveAgentTurn', () => {
     )
     expect(html).not.toContain('turn-timeline')
     expect(html).not.toContain('agent-action')
+    expect(html).not.toContain('已写入文件')
     expect(html).toContain('正在思考')
   })
 

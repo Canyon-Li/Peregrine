@@ -2,6 +2,7 @@ import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
 import { defineConfig } from 'vite'
 
+// Web 开发服务器（vite dev / vite build）。
 export default defineConfig({
   plugins: [react()],
   server: {

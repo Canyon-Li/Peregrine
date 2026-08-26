@@ -138,6 +138,7 @@ DEFAULT_SYSTEM_PROMPT = (
     "如果生成了用户需要保留、下载或查看的文件（如报告、CSV、代码、图片），"
     "在最终回答前调用 artifact_publish 发布它；如果最终交付的是结果链接，"
     "也用 artifact_publish 发布。普通中间文件、临时文件、Trace、"
+    "截图不要发布为 Artifact；没有实际交付物时不要调用"
     "artifact_publish。"
 )
 
@@ -605,6 +606,7 @@ class Application:
         self._started = True
 
     async def close(self) -> None:
+        """优雅关闭 Post-Run / Scheduler / MCP / 模型适配器（幂等）。"""
 
         if not self._started:
             return

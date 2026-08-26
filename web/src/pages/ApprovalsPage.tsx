@@ -57,11 +57,13 @@ function ApprovalItem({
   onApprove: (id: string) => void
   onDeny: (id: string) => void
 }): React.JSX.Element {
+  const title = approval.tool_name
 
   return (
     <div className="approval-card">
       <div className="approval-card__heading">
         <div className="approval-card__icon">
+          <span className="approval-card__icon-label">›</span>
         </div>
         <div className="approval-card__content">
           <div className="approval-card__title-row">

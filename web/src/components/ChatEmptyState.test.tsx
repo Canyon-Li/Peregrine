@@ -1,3 +1,4 @@
+/** ChatEmptyState：品牌入口与示例任务测试。 */
 
 import { describe, expect, it } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -5,8 +6,10 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import ChatEmptyState, { EXAMPLE_PROMPTS } from './ChatEmptyState'
 
 describe('ChatEmptyState', () => {
+  it('渲染欢迎信息和可点击示例', () => {
     const html = renderToStaticMarkup(<ChatEmptyState onSelectPrompt={() => {}} />)
     expect(html).toContain('今天想让 Peregrine 帮你完成什么？')
+    expect(html.match(/<button/g)).toHaveLength(EXAMPLE_PROMPTS.length)
     for (const prompt of EXAMPLE_PROMPTS) expect(html).toContain(prompt)
   })
 })

@@ -487,6 +487,7 @@ export function MCPInstallForm({
   return (
     <section className="extension-form">
       <div className="extension-form__fields">
+        <div className="extension-form__heading"><strong>添加 MCP Server</strong><span>当前支持 stdio；保存后重启 Host 生效</span></div>
         <label><span>Server 名称</span><input value={name} onChange={(event) => setName(event.target.value)} placeholder="例如 filesystem" /></label>
         <label><span>启动命令</span><input value={command} onChange={(event) => setCommand(event.target.value)} placeholder="例如 npx 或 /usr/local/bin/uvx" /></label>
         <label><span>参数（每行一个）</span><textarea rows={6} value={argsText} onChange={(event) => setArgsText(event.target.value)} placeholder={'-y\n@modelcontextprotocol/server-filesystem\n/Users/me/workspace'} /></label>
