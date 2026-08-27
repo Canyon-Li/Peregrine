@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,6 +19,7 @@ import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
 
 from app.context.tokens import default_token_estimator
+from app.fsutil import write_atomic_text
 
 logger = logging.getLogger("peregrine.memory.core")
 
@@ -241,13 +241,7 @@ class CoreMemoryManager:
             return len(content) // 2
 
     def _write_atomic(self, content: str) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp-{os.getpid()}")
-        try:
-            temporary.write_text(content, encoding="utf-8")
-            os.replace(temporary, self.path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        write_atomic_text(self.path, content)
 
 
 def _parse_document(text: str) -> tuple[dict[str, CoreMemoryEntry], str]:

@@ -11,9 +11,10 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from collections.abc import Sequence
 from pathlib import Path
+
+from app.fsutil import write_atomic_text
 
 from .models import MemoryRecord
 
@@ -61,10 +62,7 @@ class MemoryIndex:
         return await asyncio.to_thread(self.path.read_text, encoding="utf-8")
 
     def _write_atomic(self, content: str) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp-{os.getpid()}")
-        temporary.write_text(content, encoding="utf-8")
-        os.replace(temporary, self.path)
+        write_atomic_text(self.path, content)
 
 
 def _single_line(text: str) -> str:

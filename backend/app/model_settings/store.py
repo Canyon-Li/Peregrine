@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
+
+from app.fsutil import write_atomic_text
 
 from .models import StoredModelSettings
 
@@ -28,15 +29,12 @@ class ModelSettingsStore:
         return StoredModelSettings.model_validate(payload)
 
     def save(self, settings: StoredModelSettings) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temporary = self.path.with_name(f".{self.path.name}.tmp-{os.getpid()}")
         serialized = json.dumps(
             settings.model_dump(mode="json"),
             ensure_ascii=False,
             indent=2,
         )
-        temporary.write_text(serialized + "\n", encoding="utf-8")
-        os.replace(temporary, self.path)
+        write_atomic_text(self.path, serialized + "\n")
 
 
 __all__ = ["DEFAULT_MODEL_SETTINGS_PATH", "ModelSettingsStore"]

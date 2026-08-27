@@ -22,6 +22,8 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.fsutil import write_atomic_bytes
+
 from .models import (
     MemoryRecord,
     MemoryStatus,
@@ -240,10 +242,7 @@ class MemoryStore:
             raise ValueError(
                 f"memory file exceeds {_MAX_MEMORY_FILE_BYTES} bytes: {target.name}"
             )
-        target.parent.mkdir(parents=True, exist_ok=True)
-        temporary = target.with_name(f".{target.name}.tmp-{os.getpid()}")
-        temporary.write_bytes(encoded)
-        os.replace(temporary, target)
+        write_atomic_bytes(target, encoded)
 
     def _repair_interrupted_archives(self) -> None:
         """把已标记 archived 但仍位于 active/ 的文件移回 archive/。"""
