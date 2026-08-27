@@ -12,6 +12,7 @@ Runtime 不直接操作文件路径，统一通过 ``MemoryManager``：
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -20,8 +21,12 @@ from typing import BinaryIO
 
 try:
     import fcntl
-except ImportError:  # pragma: no cover - Windows 暂时只保留进程内锁
+except ImportError:  # pragma: no cover - Windows 改用 msvcrt 区域锁
     fcntl = None  # type: ignore[assignment]
+try:
+    import msvcrt
+except ImportError:  # pragma: no cover - POSIX 改用 fcntl
+    msvcrt = None  # type: ignore[assignment]
 
 from app.models.types import Message, MessageRole
 
@@ -38,6 +43,23 @@ from .store import DEFAULT_MEMORY_DIR, MemoryStore
 CORE_MEMORY_MESSAGE_NAME = "peregrine_core_memory"
 MEMORY_INDEX_MESSAGE_NAME = "peregrine_memory_index"
 MEMORY_POLICY_MESSAGE_NAME = "peregrine_memory_policy"
+
+
+def _lock_first_byte(handle: BinaryIO) -> None:
+    """msvcrt 的 LK_LOCK 会阻塞线程重试 10 秒才抛错，改用 NBLCK 短自旋。"""
+
+    handle.seek(0)
+    while True:
+        try:
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            return
+        except OSError:
+            time.sleep(0.01)
+
+
+def _unlock_first_byte(handle: BinaryIO) -> None:
+    handle.seek(0)
+    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 class MemoryManager:
@@ -342,7 +364,7 @@ class MemoryManager:
 
     @asynccontextmanager
     async def _mutation_guard(self) -> AsyncIterator[None]:
-        """串行化同一实例，并在 POSIX 上协调同目录的进程与 Manager。"""
+        """串行化同一实例，并用文件锁协调同目录的进程与 Manager。"""
 
         async with self._lock:
             await asyncio.to_thread(self.memory_dir.mkdir, parents=True, exist_ok=True)
@@ -357,12 +379,16 @@ class MemoryManager:
     async def _acquire_file_lock(handle: BinaryIO) -> None:
         if fcntl is not None:
             await asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_EX)
+        elif msvcrt is not None:
+            await asyncio.to_thread(_lock_first_byte, handle)
 
     @staticmethod
     async def _release_file_lock(handle: BinaryIO) -> None:
         try:
             if fcntl is not None:
                 await asyncio.to_thread(fcntl.flock, handle.fileno(), fcntl.LOCK_UN)
+            elif msvcrt is not None:
+                await asyncio.to_thread(_unlock_first_byte, handle)
         finally:
             await asyncio.to_thread(handle.close)
 
