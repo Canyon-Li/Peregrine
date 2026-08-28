@@ -35,7 +35,6 @@ from app.models.types import (
     ToolCall,
     ToolPermission,
 )
-
 from app.tools import ToolExecutor, ToolRegistry
 
 

@@ -28,8 +28,8 @@ from app.agent.events import AgentEventHandler
 from app.agent.post_run_processor import PostRunProcessor
 from app.agent.runtime import AgentRuntime
 from app.approval import (
-    WebApprovalGate,
     SQLiteApprovalStore,
+    WebApprovalGate,
 )
 from app.artifact import (
     ArtifactService,

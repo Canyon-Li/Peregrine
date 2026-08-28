@@ -19,8 +19,8 @@ from app.agent.events import AgentEventType, InMemoryEventHandler
 from app.agent.runtime import AgentRuntime
 from app.approval import (
     ApprovalRequestStatus,
-    WebApprovalGate,
     SQLiteApprovalStore,
+    WebApprovalGate,
 )
 from app.models.adapter import ModelAdapter
 from app.models.config import ModelSettings, ProviderConfig

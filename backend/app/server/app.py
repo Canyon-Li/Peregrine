@@ -34,7 +34,8 @@ from .version import __version__
 
 logger = logging.getLogger("peregrine.server")
 
-# 只允许 loopback client 读取 Artifact 内容（防止 --host 0.0.0.0 后把本地产物暴露出去）。
+# 只允许 loopback client 读取 Artifact 内容。
+# 防止 --host 0.0.0.0 后把本地产物暴露出去。
 _ALLOWED_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost"})
 _ARTIFACT_ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
