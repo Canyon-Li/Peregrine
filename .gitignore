@@ -19,21 +19,10 @@ workspace/*
 output/
 .peregrine/
 backend/.peregrine/
-# 旧数据目录（迁移前仍忽略，避免误提交用户已有数据）
-.peregrine/
-backend/.peregrine/
 
 # Local evaluation artifacts
 backend/tests/eval_legacy/reports/*.md
 !backend/tests/eval_legacy/reports/README.md
-backend/tests/eval_legacy/reports/historical/runtime/*.md
-backend/tests/eval_legacy/reports/historical/skill_learning/*.md
-
-# Private local notes and evaluation records
-docs/eval-records/
-docs/eval.md
-docs/task.md
-docs/learning-notes.md
 
 # Web (Vite)
 web/node_modules/
