@@ -1,16 +1,11 @@
 # Eval V1 报告索引
 
-本目录把“当前可比较的 Baseline”“综合运行结果”和“早期模块报告”分开保存，避免报告散落
-在不同测试模块中。
+本目录保存“当前可比较的 Baseline”。综合运行的完整输出与早期模块报告体量较大，
+只在本地保留，不入库。
 
 ## 目录职责
 
 - `baselines/`：带题集摘要、Provider、Model 等身份信息的机器可比较基线。
-- `comprehensive/`：2026-08-23 综合 Eval 的逐轮输出；每轮保留 `report.json` 和
-  `report.md`。
-- `historical/runtime/`：2026-08-06 至 08-09 的 Runtime 初代报告。
-- `historical/memory/`：2026-08-12 的 Memory 独立测评报告。
-- `historical/skill_learning/`：2026-08-18 的 Skill Learning 独立测评报告。
 
 ## 综合评测演进
 
@@ -28,6 +23,3 @@
 
 上表中的分母、场景集合和场景定义摘要并不总相同。只有 `report.json` 的 Provider、Model、
 Suite、Tier、场景集合与 digest 全部一致时，Baseline 比较才有统计意义。
-
-更完整的优化故事见
-[docs/eval-records/agent-eval-optimization-story.md](../../../../docs/eval-records/agent-eval-optimization-story.md)。
