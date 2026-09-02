@@ -109,13 +109,13 @@ async def test_shell_command_uses_working_directory(tmp_path) -> None:
         ToolCall(
             id="sh-4",
             name="run_shell_command",
-            arguments={"command": "pwd", "working_directory": "."},
+            arguments={"command": "echo probe", "working_directory": "."},
         )
     )
 
     output = json.loads(result.output or "{}")
     assert output["exit_code"] == 0
-    assert output["working_directory"] == str(tmp_path.resolve())
+    assert output["working_directory"] == tmp_path.resolve().as_posix()
 
 
 @pytest.mark.asyncio
