@@ -28,6 +28,15 @@ logger = logging.getLogger("peregrine.artifact")
 
 # V1 单文件上限：100 MB（用 mock 测试边界，不真的生成大文件）。
 MAX_ARTIFACT_BYTES = 100 * 1024 * 1024
+
+# 常见类型固定映射：Windows 注册表与各发行版的系统表结果不同
+# （如 .csv 常被标成 application/vnd.ms-excel），发布元数据不应随宿主机漂移。
+_BUILTIN_MIME_TYPES = {
+    ".csv": "text/csv",
+    ".json": "application/json",
+    ".md": "text/markdown",
+    ".txt": "text/plain",
+}
 _CHUNK_SIZE = 1024 * 1024
 _UNSAFE_FILENAME_RE = re.compile(r"[\x00-\x1f\x7f/\\]")
 
@@ -90,7 +99,8 @@ class ArtifactService:
             )
 
         filename = _safe_filename(Path(path).name)
-        mime_type = (
+        extension = Path(filename).suffix.lower()
+        mime_type = _BUILTIN_MIME_TYPES.get(extension) or (
             mimetypes.guess_type(filename)[0] or "application/octet-stream"
         )
 
