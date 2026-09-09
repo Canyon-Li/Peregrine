@@ -4,13 +4,13 @@
 - ShellCommandTool.execute 收到 asyncio.CancelledError 时终止进程组并重抛；
 - 经 RunManager 取消一个正在执行 shell 工具的 Run 后，无残留进程。
 
-使用真实本地子进程（sleep），不调用模型 API。
+使用真实本地子进程，不调用模型 API。
 """
 
 from __future__ import annotations
 
 import asyncio
-import shlex
+import sys
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -92,15 +92,43 @@ def fake_registry(
     return registry, adapter
 
 
-async def _pgrep_matches(pattern: str) -> bool:
-    """是否存在匹配 pattern 的进程（用于验证无残留）。"""
+_SLEEP_TAG = "long-sleep-probe"
 
+
+def _sleep_command() -> str:
+    """写标记后长眠的命令；cmd 与 POSIX shell 都能执行。"""
+    code = (
+        f"import pathlib,time; pathlib.Path('{_SLEEP_TAG}').write_text('x'); "
+        "time.sleep(300)"
+    )
+    return f'"{sys.executable}" -c "{code}"'
+
+
+async def _process_matches(tag: str) -> bool:
+    """是否存在命令行含 tag 的进程（用于验证无残留）。"""
+
+    if sys.platform == "win32":
+        query = (
+            "@(Get-CimInstance Win32_Process | Where-Object "
+            f"{{ $_.CommandLine -like '*{tag}*' -and $_.ProcessId -ne $PID }}"
+            ").Count -gt 0"
+        )
+        process = await asyncio.create_subprocess_exec(
+            "powershell",
+            "-NoProfile",
+            "-Command",
+            query,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout_bytes, _ = await process.communicate()
+        return stdout_bytes.strip() == b"True"
     process = await asyncio.create_subprocess_exec(
         "pgrep",
         "-f",
-        pattern,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
+        tag,
+    stdout=asyncio.subprocess.PIPE,
+    stderr=asyncio.subprocess.PIPE,
     )
     stdout_bytes, _ = await process.communicate()
     return bool(stdout_bytes.strip())
@@ -113,20 +141,19 @@ async def _pgrep_matches(pattern: str) -> bool:
 
 @pytest.mark.asyncio
 async def test_shell_tool_cancel_terminates_process_group(tmp_path: Path) -> None:
-    marker = tmp_path / "shell-started"
-    quoted = shlex.quote(str(marker))
+    marker = tmp_path / _SLEEP_TAG
     tool = ShellCommandTool(workspace_root=tmp_path)
     task = asyncio.create_task(
         tool.execute(
             {
-                "command": f"touch {quoted}; sleep 300",
+                "command": _sleep_command(),
                 "timeout_seconds": 300,
             }
         )
     )
 
-    # 等子进程真正启动（写 marker 后进入 sleep）。
-    for _ in range(100):
+    # 等子进程真正启动（写 marker 后进入 sleep）；冷启动时解释器启动较慢。
+    for _ in range(200):
         if marker.exists():
             break
         await asyncio.sleep(0.05)
@@ -138,7 +165,7 @@ async def test_shell_tool_cancel_terminates_process_group(tmp_path: Path) -> Non
 
     # 进程组应已被终止，无残留 sleep 进程。
     await asyncio.sleep(0.2)
-    assert await _pgrep_matches("sleep 300") is False
+    assert await _process_matches(_SLEEP_TAG) is False
 
 
 # ---------------------------------------------------------------------------
@@ -150,9 +177,8 @@ async def test_shell_tool_cancel_terminates_process_group(tmp_path: Path) -> Non
 async def test_runmanager_cancel_shell_run_leaves_no_process(
     tmp_path: Path,
 ) -> None:
-    marker = tmp_path / "run-shell-started"
-    quoted = shlex.quote(str(marker))
-    command = f"touch {quoted}; sleep 300"
+    marker = tmp_path / _SLEEP_TAG
+    command = _sleep_command()
     call = ToolCall(
         id="shell-1",
         name="run_shell_command",
@@ -196,4 +222,4 @@ async def test_runmanager_cancel_shell_run_leaves_no_process(
     assert checkpoint.status.value == "interrupted"
 
     await asyncio.sleep(0.2)
-    assert await _pgrep_matches("sleep 300") is False
+    assert await _process_matches(_SLEEP_TAG) is False
