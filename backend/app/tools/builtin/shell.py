@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+import subprocess
 from contextlib import suppress
 from pathlib import Path
 from time import perf_counter
@@ -129,6 +130,15 @@ def _terminate_process(process: asyncio.subprocess.Process) -> None:
         if hasattr(os, "killpg"):
             os.killpg(os.getpgid(process.pid), signal.SIGKILL)
         else:  # pragma: no cover - Windows
-            process.kill()
+            _kill_process_tree(process.pid)
     except (ProcessLookupError, PermissionError):
         pass
+
+
+def _kill_process_tree(pid: int) -> None:
+    """Windows 没有进程组信号，用 taskkill /T 连同子进程一并终止。"""
+    subprocess.run(
+        ["taskkill", "/T", "/F", "/PID", str(pid)],
+        capture_output=True,
+        check=False,
+    )
