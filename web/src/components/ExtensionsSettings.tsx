@@ -92,7 +92,7 @@ export default function ExtensionsSettings(): React.JSX.Element {
     <div className="extensions-settings">
       <header className="extensions-header">
         <div>
-          <span className="extensions-header__eyebrow">Extensions</span>
+          <span className="extensions-header__eyebrow">扩展</span>
           <h2>扩展 Peregrine 的工作能力</h2>
           <p>Skill 提供可复用方法，MCP Server 提供外部工具。安装操作由 Host 校验并写入。</p>
         </div>
@@ -229,7 +229,7 @@ export function UnifiedImportForm({
     <section className="extension-import">
       <div className="extension-import__intro">
         <div>
-          <span className="extensions-header__eyebrow">Import</span>
+          <span className="extensions-header__eyebrow">导入</span>
           <h3>从外部来源导入</h3>
           <p>粘贴 GitHub URL、owner/repo、<code>npx skills add</code> 命令或外部 <code>mcpServers</code> JSON。</p>
         </div>

@@ -17,7 +17,7 @@ export function ToastViewport(): ReactElement {
           <button
             type="button"
             className="toast__close"
-            aria-label="Dismiss"
+            aria-label="关闭通知"
             onClick={() => dismiss(item.id)}
           >
             <Icon name="close" size={14} />

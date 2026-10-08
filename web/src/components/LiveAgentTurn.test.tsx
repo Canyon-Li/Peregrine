@@ -51,7 +51,7 @@ describe('LiveAgentTurn', () => {
       />,
     )
     expect(html).not.toContain('live-turn__activity')
-    expect(html).not.toContain('Thinking')
+    expect(html).not.toContain('思考用时')
     expect(html).toContain('正在生成')
     expect(html).toContain('<strong>报告</strong>')
     expect(html).toContain('stream-cursor')

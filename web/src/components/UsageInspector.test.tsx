@@ -41,16 +41,18 @@ describe('UsageInspector', () => {
       run_budget_hard_model_calls: 12,
     }
     const html = renderToStaticMarkup(<UsageInspector summary={summary} />)
-    expect(html).toContain('94.6k processed')
+    expect(html).toContain('已处理 94.6k')
     expect(html).toContain('71.2k')
-    expect(html).toContain('Memory Reflection')
-    expect(html).toContain('Context Summary')
+    expect(html).toContain('记忆反思')
+    expect(html).toContain('上下文摘要')
     expect(html).toContain('qwen / qwen-turbo · 820 ms')
     expect(html).toContain('100.5k')
-    expect(html).toContain('10 calls')
+    expect(html).toContain('10 次调用')
     expect(html).toContain('≈39k')
-    expect(html).toContain('26.2k budgeted')
-    expect(html).toContain('Triggered by model_calls')
+    expect(html).toContain('计入预算 26.2k')
+    // 预算阶段与触发指标都走 agent/labels，界面不直接暴露后端枚举值。
+    expect(html).toContain('预警')
+    expect(html).toContain('触发原因：调用次数')
   })
 
   it('缓存字段未知时不显示成零', () => {
@@ -78,8 +80,8 @@ describe('UsageInspector', () => {
       run_budget_hard_model_calls: 12,
     }
     const html = renderToStaticMarkup(<UsageInspector summary={summary} />)
-    expect(html).toContain('Unavailable')
-    expect(html).toContain('Unavailable 不等于 0')
-    expect(html).toContain('Skipped · gate:smalltalk')
+    expect(html).toContain('无数据')
+    expect(html).toContain('「无数据」不等于 0')
+    expect(html).toContain('已跳过 · gate:smalltalk')
   })
 })

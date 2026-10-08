@@ -33,6 +33,9 @@ import { SectionHeader } from '../components/ui'
 import { useEventsStore } from '../stores/events'
 import type { PageKey } from '../App'
 
+/** 与 index.css 中 `.conversation-sidebar` 转为覆盖式抽屉的断点保持一致。 */
+const CONVERSATION_DRAWER_MAX_WIDTH = 860
+
 export default function ChatPage({
   onNavigate,
   onOpenRun,
@@ -55,6 +58,9 @@ export default function ChatPage({
   const [mode, setMode] = useState<AgentMode>('normal')
   const [draft, setDraft] = useState('')
   const [conversationSidebarOpen, setConversationSidebarOpen] = useState(true)
+  // 进入窄屏前用户是否展开着会话列表；宽屏据此还原，而不是一律展开。
+  const sidebarOpenRef = useRef(conversationSidebarOpen)
+  const restoreSidebarRef = useRef(false)
   const [runInspectorOpen, setRunInspectorOpen] = useState(false)
   const [planTask, setPlanTask] = useState<Task | null>(null)
   const [planResolved, setPlanResolved] = useState<string | null>(null)
@@ -88,6 +94,37 @@ export default function ChatPage({
       setSelectedId(initialConversationId)
     }
   }, [initialConversationId, selectedId])
+
+  useEffect(() => {
+    sidebarOpenRef.current = conversationSidebarOpen
+  }, [conversationSidebarOpen])
+
+  // 窄屏下会话列表是覆盖式抽屉，默认展开会盖住正文，所以进入窄屏先收起；
+  // 回到宽屏还原成进入前的状态，用户在窄屏手动开合过则以用户的选择为准。
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return
+    }
+    const query = window.matchMedia(`(max-width: ${CONVERSATION_DRAWER_MAX_WIDTH}px)`)
+    const sync = (narrow: boolean): void => {
+      if (narrow) {
+        restoreSidebarRef.current = sidebarOpenRef.current
+        setConversationSidebarOpen(false)
+      } else if (restoreSidebarRef.current) {
+        restoreSidebarRef.current = false
+        setConversationSidebarOpen(true)
+      }
+    }
+    sync(query.matches)
+    const onChange = (event: MediaQueryListEvent): void => sync(event.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  const toggleConversationSidebar = useCallback((): void => {
+    restoreSidebarRef.current = false
+    setConversationSidebarOpen((open) => !open)
+  }, [])
 
   const conversationQuery = useQuery({
     queryKey: ['conversation', selectedId],
@@ -513,7 +550,7 @@ export default function ChatPage({
         <RunStatusBar
           title={selectedConversation?.title || '新会话'}
           conversationSidebarOpen={conversationSidebarOpen}
-          onToggleConversationSidebar={() => setConversationSidebarOpen((open) => !open)}
+          onToggleConversationSidebar={toggleConversationSidebar}
           runStatus={activeRunStatus}
           step={latestModelStep ?? turnView.steps}
           toolCount={turnView.toolCount}
@@ -597,7 +634,7 @@ export default function ChatPage({
 
             {artifacts.length > 0 ? (
               <section className="results-section">
-                <SectionHeader title="Results" hint={`${artifacts.length} delivered`} />
+                <SectionHeader title="结果" hint={`已交付 ${artifacts.length} 个`} />
                 <div className="results-list">
                   {artifacts.map((artifact) => (
                     <ResultCard key={artifact.id} artifact={artifact} />

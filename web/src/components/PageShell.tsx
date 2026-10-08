@@ -23,17 +23,25 @@ export function PageShell({
   children,
   maxWidth = 960,
 }: PageShellProps): ReactElement {
+  // 标题区与内容区各自居中到同一宽度，两者左边缘才会对齐；
+  // 页头背景与分隔线仍铺满整行。
+  const constrain = maxWidth ? { maxWidth } : undefined
+
   return (
     <div className="page-shell">
       <header className="page-shell__header">
-        <div className="page-shell__heading">
-          <h1 className="page-shell__title">{title}</h1>
-          {subtitle ? <p className="page-shell__subtitle">{subtitle}</p> : null}
+        <div className="page-shell__inner" style={constrain}>
+          <div className="page-shell__heading">
+            <h1 className="page-shell__title">{title}</h1>
+            {subtitle ? <p className="page-shell__subtitle">{subtitle}</p> : null}
+          </div>
+          {actions ? <div className="page-shell__actions">{actions}</div> : null}
         </div>
-        {actions ? <div className="page-shell__actions">{actions}</div> : null}
       </header>
-      <div className="page-shell__body" style={maxWidth ? { maxWidth } : undefined}>
-        {children}
+      <div className="page-shell__body">
+        <div className="page-shell__inner" style={constrain}>
+          {children}
+        </div>
       </div>
     </div>
   )

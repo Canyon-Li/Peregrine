@@ -41,4 +41,15 @@ describe('PageShell', () => {
     )
     expect(html).toContain('max-width:720px')
   })
+
+  // 标题区与内容区必须落在同一个宽度约束里，否则宽屏下标题贴左、内容居中。
+  it('标题区与内容区共用同一个宽度约束', () => {
+    const html = renderToStaticMarkup(
+      <PageShell title="Artifacts" maxWidth={720}>
+        x
+      </PageShell>,
+    )
+    const constrained = html.match(/page-shell__inner[^>]*max-width:720px/g) ?? []
+    expect(constrained).toHaveLength(2)
+  })
 })

@@ -206,11 +206,15 @@ describe('ActivityItems', () => {
     )
 
     expect(html).toContain('预算计入')
+    expect(html).toContain('主 Agent')
     expect(html).toContain('12k')
     expect(html).toContain('8k')
     expect(html).toContain('2k')
     expect(html).toContain('Post-Run')
     expect(html).toContain('暂无后台处理')
+    // 预算阶段经 agent/labels 转中文，不再直接显示后端枚举值。
+    expect(html).toContain('正常')
+    expect(html).not.toContain('>active<')
     expect(html).toContain('另有 2 条活动')
     expect(html.match(/activity-item activity-item--active/g)).toHaveLength(5)
   })
@@ -231,9 +235,9 @@ describe('ActivityItems', () => {
         ]}
       />,
     )
-    expect(html).toContain('Tool results')
+    expect(html).toContain('工具结果')
     expect(html).toContain('暂无工具结果')
-    expect(html).toContain('Compaction')
+    expect(html).toContain('压缩')
     expect(html).toContain('暂无压缩')
   })
 })

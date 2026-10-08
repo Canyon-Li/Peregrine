@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react'
 import type { ReactElement } from 'react'
 
 import type { AgentMode } from '../api/types'
+import { hasStopReasonLabel, stopReasonLabel } from '../agent/labels'
 import {
   formatDuration,
   formatTokens,
@@ -26,16 +27,6 @@ const STATUS_LABEL: Record<string, { label: string; tone: string }> = {
   failed: { label: '已停止', tone: 'failed' },
   cancelled: { label: '已取消', tone: 'cancelled' },
   interrupted: { label: '已中断', tone: 'failed' },
-}
-
-const STOP_REASON_LABEL: Record<string, string> = {
-  max_steps: '已达到最大执行步数',
-  model_error: '模型调用失败',
-  repeated_tool_call: '重复调用了相同工具',
-  permission_denied: '操作未获得批准',
-  context_error: '上下文超过可用窗口',
-  cancelled: '已由用户取消',
-  interrupted: '执行已中断',
 }
 
 export default function RunStatusBar({
@@ -83,8 +74,8 @@ export default function RunStatusBar({
   const status = turnLabel ?? (runStatus ? STATUS_LABEL[runStatus] : undefined)
   const running = runStatus === 'running'
   const stopped = runStatus === 'failed' || runStatus === 'interrupted'
-  const reasonLabel = stopReason && STOP_REASON_LABEL[stopReason]
-    ? STOP_REASON_LABEL[stopReason]
+  const reasonLabel = stopReason && hasStopReasonLabel(stopReason)
+    ? stopReasonLabel(stopReason)
     : humanizeRunError(stopReason ?? null).message
 
   // 运行中 duration 每秒跳一次（起始时间来自 agent_started 事件）。

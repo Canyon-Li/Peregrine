@@ -72,7 +72,7 @@ describe('trace', () => {
     const first = event({ event_id: 'e1', sequence: 1 })
     const second = event({ event_id: 'e2', sequence: 2, step: 2 })
     expect(mergeRunEvents([first], [second, first]).map((item) => item.event_id)).toEqual(['e1', 'e2'])
-    expect(buildTraceGroups([first, second]).map((group) => group.label)).toEqual(['Step 1', 'Step 2'])
+    expect(buildTraceGroups([first, second]).map((group) => group.label)).toEqual(['第 1 步', '第 2 步'])
   })
 
   it('从持久化列表恢复最新Run，不依赖返回顺序', () => {

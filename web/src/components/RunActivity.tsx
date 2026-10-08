@@ -11,6 +11,7 @@ import {
   toolActiveLabel,
   toolDoneLabel,
 } from '../agent/turnPresentation'
+import { runBudgetStatusLabel, runStatusLabel } from '../agent/labels'
 import { useEventsStore } from '../stores/events'
 import { Icon } from './Icon'
 import { EmptyState, StatusDot, type StatusTone } from './ui'
@@ -279,15 +280,6 @@ const STATUS_TONE: Record<string, StatusTone> = {
   interrupted: 'waiting',
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  pending: '准备中',
-  running: '执行中',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-  interrupted: '已中断',
-}
-
 export function RunInspectorOverview({
   events,
   artifactCount = 0,
@@ -309,7 +301,7 @@ export function RunInspectorOverview({
   return (
     <div className="run-inspector-overview">
       <section className="inspector-section">
-        <h3>Run</h3>
+        <h3>运行</h3>
         <dl className="activity-overview activity-overview--compact">
           <div><dt>步骤</dt><dd>{view.steps}</dd></div>
           <div><dt>动作</dt><dd>{view.toolCount}</dd></div>
@@ -318,11 +310,11 @@ export function RunInspectorOverview({
       </section>
       <section className="inspector-section">
         <div className="inspector-section__heading">
-          <h3>Usage</h3>
-          <span>{usageSummary?.run_budget_status ?? '—'}</span>
+          <h3>用量</h3>
+          <span>{usageSummary ? runBudgetStatusLabel(usageSummary.run_budget_status) : '—'}</span>
         </div>
         <dl className="inspector-signal-grid">
-          <div><dt>Main</dt><dd>{usageSummary ? formatTokens(usageSummary.main_agent.total_tokens) : '—'}</dd></div>
+          <div><dt>主 Agent</dt><dd>{usageSummary ? formatTokens(usageSummary.main_agent.total_tokens) : '—'}</dd></div>
           <div><dt>预算计入</dt><dd>{usageSummary ? formatTokens(usageSummary.main_agent_chargeable_tokens) : '—'}</dd></div>
           <div><dt>调用</dt><dd>{usageSummary?.main_agent.model_calls ?? '—'}</dd></div>
           <div>
@@ -336,14 +328,14 @@ export function RunInspectorOverview({
       {context ? (
         <section className="inspector-section">
           <div className="inspector-section__heading">
-            <h3>Context</h3>
-            <span>Step {context.step}</span>
+            <h3>上下文</h3>
+            <span>第 {context.step} 步</span>
           </div>
           <dl className="inspector-signal-grid">
-            <div><dt>Input</dt><dd>{formatTokens(context.preparedInputTokens)}</dd></div>
-            <div><dt>Working budget</dt><dd>{formatTokens(context.workingInputBudget)}</dd></div>
+            <div><dt>输入</dt><dd>{formatTokens(context.preparedInputTokens)}</dd></div>
+            <div><dt>可用预算</dt><dd>{formatTokens(context.workingInputBudget)}</dd></div>
             <div>
-              <dt>Tool results</dt>
+              <dt>工具结果</dt>
               <dd className={context.toolResultTokensBefore > 0 ? undefined : 'is-empty'}>
                 {context.toolResultTokensBefore > 0
                   ? `${formatTokens(context.toolResultTokensBefore)} → ${formatTokens(context.toolResultTokensAfter)}`
@@ -351,7 +343,7 @@ export function RunInspectorOverview({
               </dd>
             </div>
             <div>
-              <dt>Compaction</dt>
+              <dt>压缩</dt>
               <dd className={context.compactionStage === 'none' ? 'is-empty' : undefined}>
                 {context.compactionStage === 'none' ? '暂无压缩' : '已执行'}
               </dd>
@@ -367,15 +359,15 @@ export function RunInspectorOverview({
       ) : null}
       <section className="inspector-section">
         <div className="inspector-section__heading">
-          <h3>Trace</h3>
-          <span>{traceEvents.length} events</span>
+          <h3>追踪</h3>
+          <span>{traceEvents.length} 个事件</span>
         </div>
         <ActivityItems events={events} limit={5} />
       </section>
       {artifactCount > 0 ? (
         <section className="inspector-result-summary">
           <Icon name="artifacts" size={15} />
-          <div><strong>{artifactCount} 个交付结果</strong><span>可在完整 Run Detail 中打开</span></div>
+          <div><strong>{artifactCount} 个交付结果</strong><span>可在完整运行详情中打开</span></div>
         </section>
       ) : null}
     </div>
@@ -430,7 +422,7 @@ export default function RunActivity({
   const title = run?.user_message || '当前 Run'
 
   return (
-    <aside className="activity run-inspector" aria-label="Run inspector">
+    <aside className="activity run-inspector" aria-label="运行详情">
       <header className="run-inspector__header">
         <div className="run-inspector__identity">
           <strong>{title}</strong>
@@ -440,11 +432,11 @@ export default function RunActivity({
           {status ? (
             <span className="run-inspector__status">
               <StatusDot tone={STATUS_TONE[status] ?? 'offline'} />
-              {STATUS_LABEL[status] ?? status}
+              {runStatusLabel(status)}
             </span>
           ) : null}
           {onClose ? (
-            <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭 Run Inspector">
+            <button type="button" className="icon-btn" onClick={onClose} aria-label="关闭运行详情">
               <Icon name="close" />
             </button>
           ) : null}
@@ -467,10 +459,10 @@ export default function RunActivity({
       {runId ? (
         <footer className="run-inspector__footer">
           <div>
-            {status === 'running' && onStop ? <button type="button" className="btn btn-danger btn-sm" onClick={onStop}>Stop</button> : null}
-            {status === 'interrupted' && onRecover ? <button type="button" className="btn btn-primary btn-sm" onClick={onRecover}>Recover</button> : null}
+            {status === 'running' && onStop ? <button type="button" className="btn btn-danger btn-sm" onClick={onStop}>停止</button> : null}
+            {status === 'interrupted' && onRecover ? <button type="button" className="btn btn-primary btn-sm" onClick={onRecover}>恢复</button> : null}
           </div>
-          {onOpenFullDetail ? <button type="button" className="btn btn-sm" onClick={() => onOpenFullDetail(runId)}>Open full detail</button> : null}
+          {onOpenFullDetail ? <button type="button" className="btn btn-sm" onClick={() => onOpenFullDetail(runId)}>打开完整详情</button> : null}
         </footer>
       ) : null}
     </aside>

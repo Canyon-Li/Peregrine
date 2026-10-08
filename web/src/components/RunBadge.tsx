@@ -1,4 +1,5 @@
 import type { RunStatus } from '../api/types'
+import { runStatusLabel } from '../agent/labels'
 
 const ORDER: RunStatus[] = [
   'pending',
@@ -10,15 +11,9 @@ const ORDER: RunStatus[] = [
 ]
 
 export default function RunBadge({ status }: { status: RunStatus }): React.JSX.Element {
-  const labels: Record<RunStatus, string> = {
-    pending: '准备中',
-    running: '运行中',
-    completed: '已完成',
-    failed: '失败',
-    cancelled: '已取消',
-    interrupted: '已中断',
-  }
-  return <span className={`badge badge-${status}`}>{labels[status]}</span>
+  // 走 runStatusLabel 而不是直接查表：接口返回值没有运行时校验，
+  // 遇到没见过的状态时显示原始值，好过一枚空白徽标。
+  return <span className={`badge badge-${status}`}>{runStatusLabel(status)}</span>
 }
 
 export { ORDER }

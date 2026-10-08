@@ -57,15 +57,16 @@ function contextEvent(): AgentEvent {
 describe('ContextInspector', () => {
   it('展示窗口、预算与压缩动作', () => {
     const html = renderToStaticMarkup(<ContextInspector events={[contextEvent()]} />)
-    expect(html).toContain('Model step')
+    expect(html).toContain('模型步骤')
     expect(html).toContain('128k')
     expect(html).toContain('6.3%')
     expect(html).toContain('50.6%')
-    expect(html).toContain('Working budget')
+    expect(html).toContain('可用预算')
     expect(html).toContain('12k / 8k')
+    expect(html).toContain('压缩工具结果并移除旧轮次')
     expect(html).toContain('4 个工具结果已压缩')
     expect(html).toContain('3 个旧工具轮已移除')
-    expect(html).toContain('Conversation summary 已更新')
+    expect(html).toContain('会话摘要已更新')
     expect(html).toContain('qwen / qwen-turbo')
     expect(html).toContain('810 ms')
     expect(html).toContain('1k')
@@ -75,6 +76,6 @@ describe('ContextInspector', () => {
 
   it('没有模型请求时显示明确空状态', () => {
     const html = renderToStaticMarkup(<ContextInspector events={[]} />)
-    expect(html).toContain('暂无 Context 数据')
+    expect(html).toContain('暂无上下文数据')
   })
 })

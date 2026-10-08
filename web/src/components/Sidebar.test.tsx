@@ -96,4 +96,26 @@ describe('Sidebar (App Shell)', () => {
     )
     expect(html).not.toContain('nav-badge--dot')
   })
+
+  // 展开/收起是 CSS 驱动的：默认收起时标签仍在 DOM 里，由 `.sidebar.is-expanded`
+  // 决定是否显示。这里只固定「CSS 能拿到什么」的契约，
+  // 实际的展开动画与点击行为在浏览器里验证。
+  it('默认收起：品牌行是带 aria-expanded 的开关，字标不再是裸文本', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar current="chat" onNavigate={() => {}} connected />,
+    )
+    expect(html).toContain('class="sidebar "')
+    expect(html).toContain('aria-expanded="false"')
+    expect(html).toContain('sidebar-brand__mark')
+    expect(html).toContain('sidebar-brand__word')
+    expect(html).toContain('展开导航栏')
+  })
+
+  it('每个导航项都渲染标签节点，供展开态显示', () => {
+    const html = renderToStaticMarkup(
+      <Sidebar current="chat" onNavigate={() => {}} connected />,
+    )
+    const labels = html.match(/nav-item__label/g) ?? []
+    expect(labels).toHaveLength(7)
+  })
 })

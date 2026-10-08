@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 
 import type { AgentEvent } from '../api/types'
+import { compactionStageLabel } from '../agent/labels'
 import { buildTraceGroups } from '../agent/runAnalysis'
 import { formatDuration, formatTokens } from '../agent/turnPresentation'
 import { EmptyState } from './ui'
@@ -10,11 +11,11 @@ import { EmptyState } from './ui'
 type TraceFilter = 'all' | 'model' | 'tools' | 'approval' | 'memory'
 
 const FILTERS: Array<{ id: TraceFilter; label: string }> = [
-  { id: 'all', label: 'All' },
-  { id: 'model', label: 'Model' },
-  { id: 'tools', label: 'Tools' },
-  { id: 'approval', label: 'Approval' },
-  { id: 'memory', label: 'Memory' },
+  { id: 'all', label: '全部' },
+  { id: 'model', label: '模型' },
+  { id: 'tools', label: '工具' },
+  { id: 'approval', label: '审批' },
+  { id: 'memory', label: '记忆' },
 ]
 
 function matches(event: AgentEvent, filter: TraceFilter): boolean {
@@ -36,12 +37,12 @@ function eventMeta(event: AgentEvent): string {
   const parts: string[] = []
   if (event.tool_call?.name) parts.push(event.tool_call.name)
   if (event.tool_result) {
-    parts.push(event.tool_result.success ? 'success' : 'failed')
+    parts.push(event.tool_result.success ? '成功' : '失败')
     parts.push(formatDuration(event.tool_result.duration_ms))
   }
-  if (event.usage) parts.push(`${formatTokens(event.usage.total_tokens)} tokens`)
+  if (event.usage) parts.push(`${formatTokens(event.usage.total_tokens)} Token`)
   if (event.compaction_stage && event.compaction_stage !== 'none') {
-    parts.push(event.compaction_stage.replaceAll('_', ' '))
+    parts.push(compactionStageLabel(event.compaction_stage))
   }
   return parts.join(' · ')
 }
@@ -53,7 +54,7 @@ export default function ExecutionTrace({ events }: { events: AgentEvent[] }): Re
 
   return (
     <div className="execution-trace">
-      <div className="trace-filters" aria-label="Trace filters">
+      <div className="trace-filters" aria-label="追踪筛选">
         {FILTERS.map((item) => (
           <button
             key={item.id}
@@ -67,7 +68,7 @@ export default function ExecutionTrace({ events }: { events: AgentEvent[] }): Re
         ))}
       </div>
       {groups.length === 0 ? (
-        <EmptyState title="没有匹配的 Trace" hint="切换筛选条件查看其它事件。" />
+        <EmptyState title="没有匹配的追踪事件" hint="切换筛选条件查看其它事件。" />
       ) : groups.map((group) => (
         <section key={group.id} className="trace-group">
           <h3>{group.label}</h3>

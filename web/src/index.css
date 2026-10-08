@@ -2746,24 +2746,108 @@ body::before { display: none; }
   background: #ebebe8;
   border-color: var(--border);
   backdrop-filter: none;
+  overflow: hidden;
+  transition: width var(--transition-layout), flex-basis var(--transition-layout),
+    padding var(--transition-layout);
 }
+.sidebar.is-expanded {
+  width: 208px;
+  flex-basis: 208px;
+  padding-inline: 8px;
+}
+
+/* 品牌行：P 字标 + 文字标，整行即展开/收起开关 */
 .sidebar-brand {
-  width: auto;
-  height: auto;
-  margin-bottom: 16px;
-  padding: 0;
+  width: 100%;
+  height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  margin: 0 0 14px;
+  padding: 0 4px;
   border: 0;
-  border-radius: 0;
+  border-radius: 8px;
   background: transparent;
   box-shadow: none;
-  color: var(--accent);
-  font-size: 18px;
-  font-weight: 800;
+  color: var(--text);
+  cursor: pointer;
+  transition: background var(--transition-fast);
+}
+.sidebar.is-expanded .sidebar-brand { justify-content: flex-start; }
+.sidebar-brand:hover { background: rgba(32, 33, 31, 0.06); }
+.sidebar-brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.sidebar-brand__mark {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 700;
   letter-spacing: -0.02em;
 }
-.nav-item { width: 38px; height: 36px; border-radius: 7px; }
+.sidebar-brand__word,
+.sidebar-brand__chevron { display: none; }
+.sidebar.is-expanded .sidebar-brand__word,
+.sidebar.is-expanded .sidebar-brand__chevron { display: block; }
+.sidebar-brand__word {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.sidebar-brand__chevron {
+  flex: 0 0 auto;
+  color: var(--text-tertiary);
+  transform: rotate(90deg);
+}
+
+/* 导航项：收起只有图标，展开为图标 + 中文标签 */
+.nav-item {
+  width: 38px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 7px;
+}
+.sidebar.is-expanded .nav-item {
+  width: 100%;
+  justify-content: flex-start;
+  gap: 10px;
+  padding: 0 9px;
+}
 .nav-item.active { color: var(--accent); background: #dce6e2; }
+.nav-item__label { display: none; }
+.sidebar.is-expanded .nav-item__label {
+  /* 覆盖旧版 .nav-item__label 的屏幕外隐藏（position:fixed; left:-10000px），
+     否则 display 改了标签依然停在视口外。 */
+  position: static;
+  left: auto;
+  width: auto;
+  height: auto;
+  display: block;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 .nav-badge { box-shadow: 0 0 0 2px #ebebe8; }
+.sidebar.is-expanded .nav-badge {
+  position: static;
+  margin-left: auto;
+  box-shadow: none;
+}
 
 .host-banner {
   background: #f6ead6;
@@ -3275,6 +3359,15 @@ kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; bac
   border-color: var(--border);
   background: var(--surface);
   backdrop-filter: none;
+}
+.page-shell__inner { width: 100%; margin-inline: auto; }
+.page-shell__header > .page-shell__inner {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
 }
 .page-shell__title { font-size: 16px; font-weight: 670; }
 .page-shell__subtitle { margin-top: 2px; font-size: 11.5px; }
@@ -3798,6 +3891,13 @@ kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; bac
 
 @media (max-width: 860px) {
   .conversation-sidebar { position: absolute; z-index: 20; inset: 0 auto 0 0; box-shadow: var(--shadow-floating); }
+  /* 窄屏下展开的导航栏改为浮层，避免挤压正文。 */
+  .sidebar.is-expanded {
+    position: absolute;
+    inset: 0 auto 0 0;
+    z-index: 40;
+    box-shadow: var(--shadow-floating);
+  }
   .message-thread { padding-inline: 18px; }
   .stat-strip { grid-template-columns: repeat(3, 1fr); }
   .automation-kind-picker,
@@ -3835,6 +3935,9 @@ kbd { padding: 1px 5px; border: 1px solid var(--border); border-radius: 4px; bac
   .command-palette,
   .page-live-status.active > span,
   .live-turn__pulse { animation: none !important; }
+  .sidebar,
+  .sidebar-brand,
+  .sidebar-brand__chevron { transition: none !important; }
 }
 
 /* ApprovalCard 人类可读描述 */

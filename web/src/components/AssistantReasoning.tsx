@@ -4,7 +4,7 @@
 - 点击展开/收起思考内容（grid 0fr→1fr 高度过渡，丝滑）。
 - 思考中不自动展开、不占正文位置：正文区只放最终回复，思考内容仅在被
   点击展开时显示。
-- label（Thinking / Thought for 1.8s）作为 title/aria-label，不占可见文本。
+- label（正在思考 / 思考用时 1.8s）作为 title/aria-label，不占可见文本。
 */
 
 import { useEffect, useRef, useState } from 'react'
@@ -23,7 +23,7 @@ export default function AssistantReasoning({
   autoExpand?: boolean
   /** 思考中（显示 spinner）。 */
   busy?: boolean
-  /** 思考耗时（思考完成、折叠时显示 “Thought for 1.8s”）。 */
+  /** 思考耗时（思考完成、折叠时显示 “思考用时 1.8s”）。 */
   durationMs?: number | null
 }): ReactElement | null {
   const [open, setOpen] = useState(autoExpand)
@@ -46,10 +46,10 @@ export default function AssistantReasoning({
   if (!text) return null
 
   const label = busy
-    ? 'Thinking'
+    ? '正在思考'
     : durationMs !== null
-      ? `Thought for ${formatDuration(durationMs)}`
-      : 'Thinking'
+      ? `思考用时 ${formatDuration(durationMs)}`
+      : '正在思考'
 
   return (
     <div

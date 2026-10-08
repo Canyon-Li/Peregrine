@@ -54,7 +54,7 @@ export default function LiveAgentTurn({
     <section
       className={`agent-turn live-turn agent-turn--${view.status}${settling ? ' live-turn--settling' : ''}`}
       aria-live="polite"
-      aria-label="Peregrine Agent Turn"
+      aria-label="Peregrine 执行轮次"
       data-status={view.status}
     >
       <header className="agent-turn__header">

@@ -93,11 +93,11 @@ export function buildContextSteps(events: AgentEvent[]): ContextStepVM[] {
       const known = messages + schemas + toolResults + skills
       const other = Math.max(0, prepared - known)
       const rawBreakdown = [
-        { key: 'messages' as const, label: 'Messages & injected', tokens: messages },
-        { key: 'tool_schemas' as const, label: 'Tool schemas', tokens: schemas },
-        { key: 'tool_results' as const, label: 'Tool results', tokens: toolResults },
-        { key: 'skills' as const, label: 'Skills', tokens: skills },
-        { key: 'other' as const, label: 'Request overhead', tokens: other },
+        { key: 'messages' as const, label: '消息与注入内容', tokens: messages },
+        { key: 'tool_schemas' as const, label: '工具定义', tokens: schemas },
+        { key: 'tool_results' as const, label: '工具结果', tokens: toolResults },
+        { key: 'skills' as const, label: '技能', tokens: skills },
+        { key: 'other' as const, label: '请求开销', tokens: other },
       ]
       return {
         step: event.step!,
@@ -147,7 +147,7 @@ export function buildTraceGroups(events: AgentEvent[]): TraceGroupVM[] {
   }
   return [...groups.entries()].map(([id, grouped]) => ({
     id,
-    label: id === 'run' ? 'Run lifecycle' : `Step ${id.slice(5)}`,
+    label: id === 'run' ? '运行生命周期' : `第 ${id.slice(5)} 步`,
     events: grouped,
   }))
 }

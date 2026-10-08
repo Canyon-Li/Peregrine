@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 
 import type { AgentEvent } from '../api/types'
+import { compactionStageLabel } from '../agent/labels'
 import {
   buildContextSteps,
   type ContextStepVM,
@@ -26,15 +27,15 @@ function CompactionList({ step }: { step: ContextStepVM }): React.JSX.Element {
     step.removedToolRounds > 0
       ? `${step.removedToolRounds} 个旧工具轮已移除`
       : null,
-    step.summaryUpdated ? 'Conversation summary 已更新' : null,
+    step.summaryUpdated ? '会话摘要已更新' : null,
   ].filter((item): item is string => item !== null)
 
   return (
     <section className="context-section">
       <div className="context-section__heading">
-        <h3>Compaction</h3>
+        <h3>压缩</h3>
         <span className={`context-stage ${step.compactionStage === 'none' ? '' : 'active'}`}>
-          {step.compactionStage === 'none' ? '未触发' : step.compactionStage.replaceAll('_', ' ')}
+          {compactionStageLabel(step.compactionStage)}
         </span>
       </div>
       {actions.length > 0 ? (
@@ -74,13 +75,13 @@ export default function ContextInspector({
   }, [selectedStep, steps])
 
   if (!selected) {
-    return <EmptyState title="暂无 Context 数据" hint="模型请求开始后会记录上下文构成。" />
+    return <EmptyState title="暂无上下文数据" hint="模型请求开始后会记录上下文构成。" />
   }
 
   return (
     <div className="context-inspector">
-      <div className="context-step-picker" aria-label="Context model step">
-        <span>Model step</span>
+      <div className="context-step-picker" aria-label="选择模型步骤">
+        <span>模型步骤</span>
         <div>
           {steps.map((step) => (
             <button
@@ -97,41 +98,41 @@ export default function ContextInspector({
       </div>
 
       <section className="context-section">
-        <h3>Context</h3>
+        <h3>上下文</h3>
         <dl className="context-metrics">
-          <div><dt>Input</dt><dd><TokenTransition before={selected.originalInputTokens} after={selected.preparedInputTokens} /></dd></div>
-          <div><dt>Context window</dt><dd className="mono">{formatTokens(selected.contextWindow)}</dd></div>
-          <div><dt>Working budget</dt><dd className="mono">{formatTokens(selected.workingInputBudget)}</dd></div>
-          <div><dt>Model input limit</dt><dd className="mono">{formatTokens(selected.inputBudget)}</dd></div>
-          <div><dt>Trigger / target</dt><dd className="mono">{formatTokens(selected.triggerTokens)} / {formatTokens(selected.targetTokens)}</dd></div>
-          <div><dt>Window usage</dt><dd className="mono">{(selected.windowUsageRatio * 100).toFixed(1)}%</dd></div>
-          <div><dt>Budget usage</dt><dd className="mono">{(selected.budgetUsageRatio * 100).toFixed(1)}%</dd></div>
-          <div><dt>Tool schemas</dt><dd className="mono">{formatTokens(selected.toolSchemaTokens)}</dd></div>
-          <div><dt>Tool results</dt><dd><TokenTransition before={selected.toolResultTokensBefore} after={selected.toolResultTokensAfter} /></dd></div>
-          <div><dt>Messages</dt><dd><TokenTransition before={selected.messageTokensBefore} after={selected.messageTokensAfter} /></dd></div>
-          <div><dt>Skills</dt><dd className="mono">{formatTokens(selected.skillTokens)}</dd></div>
+          <div><dt>输入</dt><dd><TokenTransition before={selected.originalInputTokens} after={selected.preparedInputTokens} /></dd></div>
+          <div><dt>上下文窗口</dt><dd className="mono">{formatTokens(selected.contextWindow)}</dd></div>
+          <div><dt>可用预算</dt><dd className="mono">{formatTokens(selected.workingInputBudget)}</dd></div>
+          <div><dt>模型输入上限</dt><dd className="mono">{formatTokens(selected.inputBudget)}</dd></div>
+          <div><dt>触发 / 目标</dt><dd className="mono">{formatTokens(selected.triggerTokens)} / {formatTokens(selected.targetTokens)}</dd></div>
+          <div><dt>窗口占用</dt><dd className="mono">{(selected.windowUsageRatio * 100).toFixed(1)}%</dd></div>
+          <div><dt>预算占用</dt><dd className="mono">{(selected.budgetUsageRatio * 100).toFixed(1)}%</dd></div>
+          <div><dt>工具定义</dt><dd className="mono">{formatTokens(selected.toolSchemaTokens)}</dd></div>
+          <div><dt>工具结果</dt><dd><TokenTransition before={selected.toolResultTokensBefore} after={selected.toolResultTokensAfter} /></dd></div>
+          <div><dt>消息</dt><dd><TokenTransition before={selected.messageTokensBefore} after={selected.messageTokensAfter} /></dd></div>
+          <div><dt>技能</dt><dd className="mono">{formatTokens(selected.skillTokens)}</dd></div>
         </dl>
         <progress
           className="context-window-progress"
           max={Math.max(1, selected.contextWindow)}
           value={Math.min(selected.preparedInputTokens, Math.max(1, selected.contextWindow))}
-          aria-label="Context window usage"
+          aria-label="上下文窗口占用"
         />
       </section>
 
       <section className="context-section">
-        <h3>Context breakdown</h3>
+        <h3>上下文构成</h3>
         <div className="context-breakdown">
           {selected.breakdown.map((item) => (
             <div key={item.key} className="context-breakdown__row">
               <span>{item.label}</span>
-              <progress max={1} value={item.ratio} aria-label={`${item.label} ratio`} />
+              <progress max={1} value={item.ratio} aria-label={`${item.label} 占比`} />
               <strong className="mono">{formatTokens(item.tokens)}</strong>
               <small className="mono">{(item.ratio * 100).toFixed(0)}%</small>
             </div>
           ))}
         </div>
-        <p className="context-note">Memory、Task 与系统消息当前没有独立计数字段，统一包含在 Messages &amp; injected。</p>
+        <p className="context-note">Memory、Task 与系统消息当前没有独立计数字段，统一包含在「消息与注入内容」中。</p>
       </section>
 
       <CompactionList step={selected} />

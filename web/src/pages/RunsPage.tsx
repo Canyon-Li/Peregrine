@@ -48,7 +48,7 @@ export default function RunsPage({
       subtitle="查看每次执行的状态、证据、用量与恢复点。"
       maxWidth={1360}
       actions={
-        <div className="segmented-control" aria-label="Run filter">
+        <div className="segmented-control" aria-label="执行记录筛选">
           {(['all', 'running', 'attention'] as const).map((item) => (
             <button
               key={item}

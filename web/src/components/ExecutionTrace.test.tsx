@@ -53,7 +53,8 @@ describe('ExecutionTrace', () => {
       }),
     ]
     const html = renderToStaticMarkup(<ExecutionTrace events={events} />)
-    expect(html).toContain('Step 1')
+    // 分组标题中文化；事件类型仍是后端协议标识，保留英文。
+    expect(html).toContain('第 1 步')
     expect(html).toContain('tool approval completed')
     expect(html).toContain('write_file')
     expect(html).toContain('125ms')
